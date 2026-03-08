@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <title>Learning Accelerator</title>
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Ledger&family=Quicksand:wght@300..700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles/base.css">
+  <link rel="stylesheet" href="styles/graph.css">
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Learning Accelerator <span style="font-size: 0.3em; font-weight: 400; color: rgba(255,255,255,0.35); letter-spacing: 0.005em;">by ajorge2</span></h1>
+  <div class="page-header-controls">
+    <div id="search-wrapper">
+      <input id="search-input" type="text" placeholder="Search ideas & links…" autocomplete="off" spellcheck="false" />
+      <div id="search-results"></div>
+    </div>
+    <div class="view-toggle">
+      <button id="toggle-graph" class="btn btn-ghost btn-sm active" onclick="switchView('graph')">Graph</button>
+      <button id="toggle-table" class="btn btn-ghost btn-sm" onclick="switchView('table')">Table</button>
+    </div>
+    <button class="btn btn-ghost btn-sm btn-clear" onclick="clearGraph()">Clear Graph</button>
+  </div>
+</div>
+
+<section id="graph-section" style="height: 680px;">
+  <div id="graph-container" style="height: 680px;">
+    <div id="graph-toolbar">
+      <button id="btn-attach" class="btn btn-ghost btn-sm" onclick="toggleAttachMode()">⊕ Attach</button>
+      <div class="toolbar-actions">
+        <div class="toolbar-action-row">
+          <button class="btn btn-ghost btn-sm" onclick="openAddNode()">+ Add Idea</button>
+          <button id="btn-cheese" class="btn btn-ghost btn-sm" onclick="toggleCheeseMode()" title="Toggle marble effect">🧀</button>
+        </div>
+        <div class="toolbar-zoom">
+          <button class="btn btn-ghost btn-sm btn-square" onclick="zoomIn()">+</button>
+          <button class="btn btn-ghost btn-sm btn-square" onclick="zoomOut()">−</button>
+        </div>
+      </div>
+    </div>
+    <div id="connect-pill">
+      <span>2 selected</span>
+      <button class="btn-connect" onclick="connectMultiSelected()">↔ Connect</button>
+      <button class="btn-isolate" onclick="isolateSelected()">⊠ Isolate</button>
+    </div>
+    <div id="isolation-pill">
+      <span id="isolation-pill-label"></span>
+      <button class="btn-exit-isolation" onclick="exitIsolation()">✕ Exit Isolation</button>
+    </div>
+    <div id="selection-list">
+      <div id="selection-list-header"></div>
+      <div id="selection-list-items"></div>
+    </div>
+    <div id="graph-toast"></div>
+    <div id="attach-hint">Hold <u>Shift</u> to connect in both directions</div>
+    <div id="attach-escape-hint">Press <u>Esc</u> to exit attach mode</div>
+    <button id="attach-go-back">⌖ Go back to node</button>
+    <div id="attach-result">
+      <input id="attach-desc-input" type="text" placeholder="Describe this connection…" autocomplete="off" />
+      <button class="btn-attach-action btn-attach-undo" id="attach-undo-btn">↩ Undo</button>
+      <button class="btn-attach-action btn-attach-edit" id="attach-edit-btn">Edit</button>
+      <span class="pill-error" id="attach-result-error"></span>
+    </div>
+    <div id="node-result">
+      <input id="node-title-input" type="text" placeholder="Name this idea…" autocomplete="off" />
+      <button class="btn-attach-action btn-attach-undo" id="node-undo-btn">↩ Undo</button>
+      <button class="btn-attach-action btn-attach-edit" id="node-edit-btn">Edit</button>
+      <span class="pill-error" id="node-result-error"></span>
+    </div>
+    <div id="node-hover-label"></div>
+    <div id="graph-trash">🗑</div>
+    <div id="canvas-ctx-menu"><button id="canvas-ctx-add">+ Add Idea Here</button></div>
+    <svg id="graph-svg"></svg>
+    <div id="graph-vignette"></div>
+    <div id="graph-empty">
+      <p>No ideas yet!</p>
+      <button class="btn-primary" onclick="openAddNode()">+ Add Idea</button>
+    </div>
+    <div id="graph-detail-panel" style="display:none;">
+      <div class="detail-resize-r"  data-dir="r"></div>
+      <div class="detail-resize-b"  data-dir="b"></div>
+      <div class="detail-resize-br" data-dir="br"></div>
+      <div class="detail-resize-l"  data-dir="l"></div>
+      <div class="detail-resize-t"  data-dir="t"></div>
+      <div class="detail-resize-tl" data-dir="tl"></div>
+      <div class="detail-resize-tr" data-dir="tr"></div>
+      <div class="detail-resize-bl" data-dir="bl"></div>
+      <div class="detail-header">
+        <button class="btn-close" onclick="deselectAll()">×</button>
+      </div>
+      <div id="detail-content"></div>
+      <div class="detail-footer">
+        <button id="btn-enter-focus" onclick="enterDeepFocusMode()" title="Enter Focus Mode">↗</button>
+        <div id="palette-dropdown-container"></div>
+        <button class="btn-edit" id="detail-edit-btn">Edit</button>
+        <button class="btn-delete" id="detail-delete-btn">Delete</button>
+      </div>
+    </div>
+    <div id="deep-focus-exit" style="display:none;">
+      <span class="exit-label">Focus Mode</span>
+      <button class="exit-btn" onclick="exitDeepFocusMode()">Exit</button>
+    </div>
+  </div>
+</section>
+
+<div id="table-sections" style="display:none;">
+  <section>
+    <div class="section-header">
+      <h2>Ideas</h2>
+      <button class="btn btn-ghost btn-sm" onclick="openAddNode()">+ Add Idea</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Description</th>
+          <th>Connected Ideas</th>
+          <th>Connections</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="nodes-body"></tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="section-header">
+      <h2>Connections</h2>
+      <button class="btn btn-ghost btn-sm" onclick="openEdgeModal()">+ Add Connection</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Description</th>
+          <th>Nodes</th>
+          <th>Type</th>
+          <th>Source</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="edges-body"></tbody>
+    </table>
+  </section>
+</div>
+
+<div id="modal-overlay" class="overlay">
+  <div id="modal-box" class="glass-box">
+    <div class="modal-header">
+      <h3 id="modal-title"></h3>
+      <button class="btn-close" onclick="closeModal()">×</button>
+    </div>
+    <div id="modal-body"></div>
+    <p id="modal-error" class="error"></p>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" id="modal-submit">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="sub-modal-overlay" class="overlay">
+  <div id="sub-modal-box" class="glass-box">
+    <div class="modal-header">
+      <h3>Add Idea</h3>
+      <button class="btn-close" onclick="closeSubModal()">×</button>
+    </div>
+    <div id="sub-modal-body"></div>
+    <p id="sub-modal-error" class="error"></p>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeSubModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitSubModalNode()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="confirm-overlay" class="overlay">
+  <div id="confirm-box" class="glass-box">
+    <p id="confirm-message"></p>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeConfirm()">Cancel</button>
+      <button class="btn-danger" id="confirm-ok">Delete</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="scripts/main.js"></script>
+</body>
+</html>

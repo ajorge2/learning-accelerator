@@ -1,0 +1,9 @@
+add search functionality (algolia api)
+    as your keywords eliminate nodes/edges as candidates, make those vanish in real time and reappear when you backspace
+    make a tab bar to specify type of search (connections, idea titles, idea notes, ideas, all)
+    for each tab bar make filters for the search (connected to this node, dirrectly connected, connected to this edge, directly connected,)
+you should be able to attach all selected nodes to a node at once with the bulk select option (can only do a certain number at a time though, but the bulk select already has a limit). if the node doesn't exist you should be able to create a new node right there like you can in the normal attach mode view
+add option to log in (google firebase auth api). this lets you connect to the database
+look into whiteboard sdks for handwritten notes feature. also look for canvas libraries for vector drawing.
+    you also have to store json-like objects for the pen strokes which need to be stored somewhere, so something like firestore can help with the real time updates/storage (basically higher level websockets). doesn't update every second but can update frequently enough (minute by minute basis)
+for exploratory learning, perplexity ai search api is perfect.

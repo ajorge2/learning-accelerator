@@ -1,0 +1,7 @@
+frontend/config.js
+.env.local
+node_modules/
+dist/
+__pycache__/
+*.pyc
+graph.db
