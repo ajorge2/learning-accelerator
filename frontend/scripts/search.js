@@ -30,7 +30,7 @@ async function handleSearch(query) {
           const label = hit.body || '<span style="font-style:italic;color:#2d3f52">No description</span>';
           const ctx   = `${hit.nodeATitle || '?'} → ${hit.nodeBTitle || '?'}`;
           return `<div class="search-result-item" onclick="navigateToResult('edge','${hit.edgeId}')">
-            <span class="search-result-type edge">Link</span>
+            <span class="search-result-type edge">Conn</span>
             <div class="search-result-text">
               <div class="search-result-title">${ctx}</div>
               <div class="search-result-sub">${label}</div>

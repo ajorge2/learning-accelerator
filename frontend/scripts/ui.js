@@ -1,11 +1,15 @@
 import { nodes, edges, loadData, apiRequest, confirmDelete, API } from './api.js';
 import { attachMode, toggleAttachMode } from './graph.js';
+import { addHistory } from './history.js';
 
 // ---- Confirm dialog ----
 
-export function showConfirm(message, onConfirm) {
+export function showConfirm(message, onConfirm, { okLabel = 'Delete', okClass = 'btn-danger' } = {}) {
   document.getElementById('confirm-message').textContent = message;
-  document.getElementById('confirm-ok').onclick = () => { closeConfirm(); onConfirm(); };
+  const okBtn = document.getElementById('confirm-ok');
+  okBtn.textContent = okLabel;
+  okBtn.className = okClass;
+  okBtn.onclick = () => { closeConfirm(); onConfirm(); };
   document.getElementById('confirm-overlay').classList.add('open');
 }
 
@@ -45,24 +49,14 @@ export function renderNodes() {
   const tbody = document.getElementById('nodes-body');
   const list = Object.values(nodes);
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty">No ideas yet!</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="2" class="empty">No ideas yet!</td></tr>';
     return;
   }
   tbody.innerHTML = list.map(n => {
-    const connNodes = n.connected_node_ids.map(id =>
-      `<span class="tag">${nodes[id]?.title ?? id}</span>`
-    ).join('') || '—';
-    const connEdges = n.connected_edge_ids
-      .filter(id => edges[id]?.body)
-      .map(id => `<span class="tag tag-edge">${edges[id].body}</span>`)
-      .join('');
     return `<tr>
       <td>${n.title}</td>
-      <td>${n.body ?? '—'}</td>
-      <td>${connNodes}</td>
-      <td>${connEdges}</td>
       <td class="cell-actions">
-        <button class="btn-edit" onclick="openEditNode('${n.id}')">Edit</button>
+        <button class="btn-edit" onclick="selectNodeById('${n.id}')">View</button>
         <button class="btn-delete" onclick="deleteNode('${n.id}')">Delete</button>
       </td>
     </tr>`;
@@ -73,7 +67,7 @@ export function renderEdges() {
   const tbody = document.getElementById('edges-body');
   const list = Object.values(edges);
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty">No connections yet!</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">No connections yet!</td></tr>';
     return;
   }
   tbody.innerHTML = list.map(e => {
@@ -84,12 +78,11 @@ export function renderEdges() {
       : '<span class="badge badge-dir">Directed</span>';
     const source = e.source_id ? (nodes[e.source_id]?.title ?? e.source_id) : '—';
     return `<tr>
-      <td>${e.body}</td>
       <td>${aTitle} — ${bTitle}</td>
       <td>${typeBadge}</td>
       <td>${source}</td>
       <td class="cell-actions">
-        <button class="btn-edit" onclick="openEdgeModal('${e.id}')">Edit</button>
+        <button class="btn-edit" onclick="selectEdgeById('${e.id}')">View</button>
         <button class="btn-delete" onclick="deleteEdge('${e.id}')">Delete</button>
       </td>
     </tr>`;
@@ -196,7 +189,12 @@ export function openEditNode(id) {
 }
 
 export function deleteNode(id) {
-  confirmDelete(`${API}/nodes/${id}`, `Delete "${nodes[id].title}"? Its connections will also be deleted.`);
+  const title = nodes[id]?.title ?? id;
+  showConfirm(`Delete "${title}"? Its connections will also be deleted.`, async () => {
+    await fetch(`${API}/nodes/${id}`, { method: 'DELETE' });
+    addHistory(`Deleted "${title}"`, '✕');
+    loadData();
+  });
 }
 
 // ---- Edge forms ----
@@ -350,7 +348,13 @@ export function openEdgeModal(id = null) {
 }
 
 export function deleteEdge(id) {
-  confirmDelete(`${API}/edges/${id}`, `Delete connection?`);
+  const e = edges[id];
+  const label = e ? `"${nodes[e.node_a_id]?.title}"–"${nodes[e.node_b_id]?.title}"` : 'connection';
+  showConfirm(`Delete connection?`, async () => {
+    await fetch(`${API}/edges/${id}`, { method: 'DELETE' });
+    addHistory(`Deleted connection ${label}`, '✕');
+    loadData();
+  });
 }
 
 export function clearGraph() {
@@ -365,9 +369,23 @@ export function clearGraph() {
 
 export function switchView(view) {
   document.getElementById('graph-section').style.display  = view === 'graph' ? '' : 'none';
-  document.getElementById('table-sections').style.display = view === 'table' ? '' : 'none';
+  document.getElementById('table-scroll-wrap').style.display = view === 'table' ? '' : 'none';
   document.getElementById('toggle-graph').classList.toggle('active', view === 'graph');
   document.getElementById('toggle-table').classList.toggle('active', view === 'table');
+  if (view === 'table') _initScrollFade();
+}
+
+function _initScrollFade() {
+  const wrap = document.getElementById('table-scroll-wrap');
+  const scroller = document.getElementById('table-sections');
+  const update = () => {
+    const atStart = scroller.scrollLeft <= 4;
+    const atEnd = scroller.scrollLeft + scroller.clientWidth >= scroller.scrollWidth - 4;
+    wrap.style.setProperty('--fade-l', atStart ? '0' : '1');
+    wrap.style.setProperty('--fade-r', atEnd ? '0' : '1');
+  };
+  scroller.addEventListener('scroll', update, { passive: true });
+  update();
 }
 
 // ---- Window exports (for inline HTML handlers) ----

@@ -25,9 +25,10 @@ def init_db():
     with _db() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS nodes (
-                id    TEXT PRIMARY KEY,
-                title TEXT NOT NULL CHECK(length(title) <= 150),
-                body  TEXT CHECK(body IS NULL OR length(body) <= 50000)
+                id        TEXT PRIMARY KEY,
+                title     TEXT NOT NULL CHECK(length(title) <= 150),
+                body      TEXT CHECK(body IS NULL OR length(body) <= 50000),
+                node_type TEXT NOT NULL DEFAULT 'Normal'
             );
 
             CREATE TABLE IF NOT EXISTS edges (
@@ -40,9 +41,13 @@ def init_db():
                 CHECK(node_a_id != node_b_id)
             );
 
-            CREATE UNIQUE INDEX IF NOT EXISTS edges_pair
-                ON edges(min(node_a_id, node_b_id), max(node_a_id, node_b_id));
+            DROP INDEX IF EXISTS edges_pair;
         """)
+        # Migration: add node_type to existing DBs that don't have it yet
+        try:
+            conn.execute("ALTER TABLE nodes ADD COLUMN node_type TEXT NOT NULL DEFAULT 'Normal'")
+        except Exception:
+            pass
 
 
 # ── serialisation ─────────────────────────────────────────────────────────────
@@ -57,6 +62,7 @@ def _node_dict(conn, row: sqlite3.Row) -> dict:
         "id": nid,
         "title": row["title"],
         "body": row["body"],
+        "node_type": row["node_type"],
         "connected_node_ids": [
             r["node_b_id"] if r["node_a_id"] == nid else r["node_a_id"]
             for r in edge_rows
@@ -95,13 +101,19 @@ def get_node(node_id: str) -> dict | None:
         return _node_dict(conn, row) if row else None
 
 
-def create_node(node_id: str, title: str, body: str | None = None) -> dict:
+def create_node(node_id: str, title: str, body: str | None = None, node_type: str = "Normal") -> dict:
     with _db() as conn:
         conn.execute(
-            "INSERT INTO nodes (id, title, body) VALUES (?,?,?)",
-            (node_id, title, body),
+            "INSERT INTO nodes (id, title, body, node_type) VALUES (?,?,?,?)",
+            (node_id, title, body, node_type),
         )
     return get_node(node_id)
+
+
+def get_subject_node_id() -> str | None:
+    with _db() as conn:
+        row = conn.execute("SELECT id FROM nodes WHERE node_type='Subject'").fetchone()
+        return row["id"] if row else None
 
 
 def update_node(node_id: str, **fields) -> dict | None:
@@ -109,11 +121,12 @@ def update_node(node_id: str, **fields) -> dict | None:
         row = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
         if row is None:
             return None
-        new_title = fields.get("title", row["title"])
-        new_body  = fields.get("body",  row["body"])
+        new_title     = fields.get("title",     row["title"])
+        new_body      = fields.get("body",      row["body"])
+        new_node_type = fields.get("node_type", row["node_type"])
         conn.execute(
-            "UPDATE nodes SET title=?, body=? WHERE id=?",
-            (new_title, new_body, node_id),
+            "UPDATE nodes SET title=?, body=?, node_type=? WHERE id=?",
+            (new_title, new_body, new_node_type, node_id),
         )
     return get_node(node_id)
 
@@ -181,6 +194,12 @@ def delete_edge(edge_id: str) -> bool:
 
 
 def clear_graph():
+    with _db() as conn:
+        conn.execute("DELETE FROM edges")
+        conn.execute("DELETE FROM nodes WHERE node_type != 'Subject'")
+
+
+def reset_graph():
     with _db() as conn:
         conn.execute("DELETE FROM edges")
         conn.execute("DELETE FROM nodes")

@@ -9,7 +9,7 @@
   <link rel="manifest" href="/site.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Ledger&family=Quicksand:wght@300..700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Antic+Didone&family=Ledger&family=Quicksand:wght@300..700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles/base.css">
   <link rel="stylesheet" href="styles/graph.css">
 </head>
@@ -19,28 +19,35 @@
   <h1>Learning Accelerator <span style="font-size: 0.3em; font-weight: 400; color: rgba(255,255,255,0.35); letter-spacing: 0.005em;">by ajorge2</span></h1>
   <div class="page-header-controls">
     <div id="search-wrapper">
-      <input id="search-input" type="text" placeholder="Search ideas & links…" autocomplete="off" spellcheck="false" />
+      <input id="search-input" type="text" placeholder="Search ideas & connections…" autocomplete="off" spellcheck="false" />
       <div id="search-results"></div>
     </div>
     <div class="view-toggle">
       <button id="toggle-graph" class="btn btn-ghost btn-sm active" onclick="switchView('graph')">Graph</button>
       <button id="toggle-table" class="btn btn-ghost btn-sm" onclick="switchView('table')">Table</button>
     </div>
-    <button class="btn btn-ghost btn-sm btn-clear" onclick="clearGraph()">Clear Graph</button>
   </div>
 </div>
 
 <section id="graph-section" style="height: 680px;">
   <div id="graph-container" style="height: 680px;">
     <div id="graph-toolbar">
-      <button id="btn-attach" class="btn btn-ghost btn-sm" onclick="toggleAttachMode()">⊕ Attach</button>
+      <div class="toolbar-left">
+        <button id="btn-attach" class="btn btn-ghost btn-sm" onclick="toggleAttachMode()">⊕ Attach</button>
+        <button id="btn-lasso-type" class="btn btn-ghost btn-sm" onclick="openLassoFilter()">Lasso Type</button>
+        <div id="lasso-filter" class="lasso-filter">
+          <button type="button" class="btn btn-ghost btn-sm lasso-filter-close" onclick="closeLassoFilter()">×</button>
+          <button type="button" class="btn btn-ghost btn-sm lasso-opt" data-mode="rect" onclick="setLassoMode('rect')">▭ Rect</button>
+          <button type="button" class="btn btn-ghost btn-sm lasso-opt" data-mode="free" onclick="setLassoMode('free')">⌒ Free</button>
+        </div>
+      </div>
       <div class="toolbar-actions">
         <div class="toolbar-action-row">
-          <button class="btn btn-ghost btn-sm" onclick="openAddNode()">+ Add Idea</button>
-          <button id="btn-cheese" class="btn btn-ghost btn-sm" onclick="toggleCheeseMode()" title="Toggle marble effect">🧀</button>
+          <button id="btn-add-idea" class="btn btn-ghost btn-sm" onclick="openAddNode()">+ Add Idea</button>
         </div>
         <div class="toolbar-zoom">
           <button class="btn btn-ghost btn-sm btn-square" onclick="zoomIn()">+</button>
+          <input id="zoom-slider" type="range" min="0.4" max="4" step="0.01" value="1" title="Zoom level">
           <button class="btn btn-ghost btn-sm btn-square" onclick="zoomOut()">−</button>
         </div>
       </div>
@@ -75,6 +82,17 @@
       <span class="pill-error" id="node-result-error"></span>
     </div>
     <div id="node-hover-label"></div>
+    <div id="graph-options-wrap">
+      <button id="btn-graph-options" class="btn btn-ghost btn-sm" onclick="openGraphOptions()">Graph Options</button>
+      <div id="graph-options-menu" class="lasso-filter">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="closeGraphOptions()">×</button>
+        <button type="button" id="btn-float-toggle" class="btn btn-ghost btn-sm" onclick="toggleFloatMode()">⟡ Float: On</button>
+        <button type="button" id="btn-cheese" class="btn btn-ghost btn-sm" onclick="toggleCheeseMode()" title="Toggle marble effect">🧀</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="location.reload()">↺ Refresh</button>
+        <button type="button" class="btn btn-ghost btn-sm btn-clear" onclick="closeGraphOptions();clearGraph()">Clear Graph</button>
+      </div>
+    </div>
+    <button id="history-tab" onclick="toggleHistoryDrawer()">History</button>
     <div id="graph-trash">🗑</div>
     <div id="canvas-ctx-menu"><button id="canvas-ctx-add">+ Add Idea Here</button></div>
     <svg id="graph-svg"></svg>
@@ -110,7 +128,8 @@
   </div>
 </section>
 
-<div id="table-sections" style="display:none;">
+<div id="table-scroll-wrap" style="display:none;">
+<div id="table-sections">
   <section>
     <div class="section-header">
       <h2>Ideas</h2>
@@ -120,9 +139,6 @@
       <thead>
         <tr>
           <th>Title</th>
-          <th>Description</th>
-          <th>Connected Ideas</th>
-          <th>Connections</th>
           <th></th>
         </tr>
       </thead>
@@ -138,7 +154,6 @@
     <table>
       <thead>
         <tr>
-          <th>Description</th>
           <th>Nodes</th>
           <th>Type</th>
           <th>Source</th>
@@ -148,6 +163,7 @@
       <tbody id="edges-body"></tbody>
     </table>
   </section>
+</div>
 </div>
 
 <div id="modal-overlay" class="overlay">
@@ -186,6 +202,67 @@
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeConfirm()">Cancel</button>
       <button class="btn-danger" id="confirm-ok">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div id="history-overlay" onclick="toggleHistoryDrawer()"></div>
+<div id="history-drawer">
+  <div class="history-drawer-header">
+    <h3>Recent Edits</h3>
+    <button class="history-close" onclick="toggleHistoryDrawer()">×</button>
+  </div>
+  <ul id="history-list"></ul>
+</div>
+
+<div id="questionnaire-screen" style="display:none;">
+  <div id="questionnaire-box">
+    <h1 class="landing-title" id="questionnaire-subject-title"></h1>
+    <p class="landing-sub">Tell us a bit about where you're starting from.</p>
+    <div class="questionnaire-fields">
+      <div class="q-field">
+        <label class="q-label">What is your goal in understanding the subject?</label>
+        <textarea id="q-goal" class="q-textarea" rows="3" placeholder="e.g. Pass my exam, build a project, satisfy curiosity…" autocomplete="off" spellcheck="false"></textarea>
+      </div>
+      <div class="q-field">
+        <label class="q-label">How important does learning this subject feel to you? <span id="q-importance-value" class="q-slider-value">5</span></label>
+        <input id="q-importance" type="range" min="1" max="10" step="1" value="5" class="q-slider" list="q-importance-ticks" />
+        <datalist id="q-importance-ticks">
+          <option value="1"></option><option value="2"></option><option value="3"></option>
+          <option value="4"></option><option value="5"></option><option value="6"></option>
+          <option value="7"></option><option value="8"></option><option value="9"></option>
+          <option value="10"></option>
+        </datalist>
+        <div class="q-slider-labels"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span></div>
+      </div>
+      <div class="q-field">
+        <label class="q-label">Outline what you know:</label>
+        <textarea id="q-knowledge" class="q-textarea" rows="4" placeholder="Jot down anything you already understand about this subject…" autocomplete="off" spellcheck="false"></textarea>
+      </div>
+    </div>
+    <button id="btn-questionnaire-continue" class="btn-landing-primary" disabled>Start Learning</button>
+    <button id="btn-questionnaire-skip" class="btn-landing-ghost">Skip</button>
+  </div>
+</div>
+
+<div id="landing-screen">
+  <div id="landing-box">
+    <h1 class="landing-title">Learning Accelerator</h1>
+    <p class="landing-sub">by ajorge2</p>
+
+    <div id="landing-continue-section" style="display:none;">
+      <p class="landing-current-subject">Currently working on: <span id="landing-subject-title"></span></p>
+      <button id="btn-continue" class="btn-landing-primary">Continue where you left off</button>
+    </div>
+
+    <div id="landing-or" class="landing-or" style="display:none;">or</div>
+
+    <button id="btn-new-subject-toggle" class="btn-landing-ghost" style="display:none;">Start with a new subject</button>
+
+    <div id="new-subject-form" style="display:none;">
+      <input id="subject-input" type="text" placeholder="e.g. Linear Algebra" autocomplete="off" spellcheck="false" />
+      <button id="btn-create-subject" class="btn-landing-primary">New Subject</button>
+      <p id="landing-error" class="landing-error"></p>
     </div>
   </div>
 </div>

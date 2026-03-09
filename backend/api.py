@@ -23,10 +23,12 @@ app.add_middleware(
 class CreateNodeRequest(BaseModel):
     title: str
     body: str | None = None
+    node_type: str = "Normal"
 
 class UpdateNodeRequest(BaseModel):
     title: str | None = None
     body: str | None = None
+    node_type: str | None = None
 
 class CreateEdgeRequest(BaseModel):
     body: str | None = None
@@ -52,7 +54,7 @@ def get_nodes():
 @app.post("/nodes", status_code=201)
 def create_node(req: CreateNodeRequest):
     try:
-        return graph.create_node(req.title, req.body)
+        return graph.create_node(req.title, req.body, req.node_type)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -76,8 +78,11 @@ def update_node(node_id: str, req: UpdateNodeRequest):
 
 @app.delete("/nodes/{node_id}", status_code=204)
 def delete_node(node_id: str):
-    if not graph.delete_node(node_id):
-        raise HTTPException(status_code=404, detail="Node not found")
+    try:
+        if not graph.delete_node(node_id):
+            raise HTTPException(status_code=404, detail="Node not found")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
 
 
 # --- Edge routes ---
@@ -126,5 +131,8 @@ def delete_edge(edge_id: str):
 # --- Graph ---
 
 @app.delete("/graph", status_code=204)
-def clear_graph():
-    graph.clear_graph()
+def clear_graph(full: bool = False):
+    if full:
+        db.reset_graph()
+    else:
+        graph.clear_graph()

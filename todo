@@ -7,3 +7,8 @@ add option to log in (google firebase auth api). this lets you connect to the da
 look into whiteboard sdks for handwritten notes feature. also look for canvas libraries for vector drawing.
     you also have to store json-like objects for the pen strokes which need to be stored somewhere, so something like firestore can help with the real time updates/storage (basically higher level websockets). doesn't update every second but can update frequently enough (minute by minute basis)
 for exploratory learning, perplexity ai search api is perfect.
+nodes should go back to their color once in isolation, the yellow is only for when youre still selecting.
+"a" to attach should work in isolation mode
+creating a node in isolation isn't working.
+also should be able to remove nodes from the isolated view while in isolation
+create front page screen, initial prompt screen, outline screen, questions screen, play screen, and finalized diagram screen

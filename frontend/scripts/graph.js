@@ -1,6 +1,7 @@
 import * as d3 from 'd3';
 import { nodes, edges, loadData, apiRequest, API } from './api.js';
 import { showConfirm, openEditNode, deleteNode, openEdgeModal, deleteEdge } from './ui.js';
+import { addHistory } from './history.js';
 
 const NODE_R         = 14;  // base SVG radius of every node circle
 const HOVER_VISUAL_R = 17;  // screen-pixel radius a hovered node grows to
@@ -35,6 +36,20 @@ const NODE_PALETTE = [
   { name: 'Charcoal',    h: 220, s:  8, l: 20 },
   { name: 'Stone',       h: 30,  s:  8, l: 32 },
   { name: 'Ash',         h: 30,  s:  4, l: 24 },
+];
+
+// Edge palette: explicit stroke colors. Index 0 = default white.
+const EDGE_PALETTE = [
+  { name: 'Default', color: 'rgba(255,255,255,0.78)' },
+  { name: 'Blue',    color: 'rgba(96,165,250,0.9)'   },
+  { name: 'Teal',    color: 'rgba(45,212,191,0.9)'   },
+  { name: 'Green',   color: 'rgba(74,222,128,0.9)'   },
+  { name: 'Lime',    color: 'rgba(163,230,53,0.9)'   },
+  { name: 'Amber',   color: 'rgba(251,191,36,0.9)'   },
+  { name: 'Orange',  color: 'rgba(251,146,60,0.9)'   },
+  { name: 'Rose',    color: 'rgba(251,113,133,0.9)'  },
+  { name: 'Violet',  color: 'rgba(167,139,250,0.9)'  },
+  { name: 'Cyan',    color: 'rgba(34,211,238,0.9)'   },
 ];
 
 function nodeColorVars(colorIdx) {
@@ -72,11 +87,17 @@ let savedZoomIsolation = null;
 let _pendingNodePos = null;
 let multiSelected = new Set();
 let selectionListOrder = [];
+export let lassoMode = 'rect';
+export let floatMode = true;
+const _edgeBends = new Map(); // edge_id -> { offset, vel }  — only for parallel pairs
+let _bendSettled = true;
+let _bendAnimId  = null;
 const SIM_STORAGE_KEY = 'nodeSimData';
 let nodeSimData = (() => {
   try { return JSON.parse(localStorage.getItem(SIM_STORAGE_KEY)) || {}; } catch { return {}; }
 })();
 export let cheeseMode = localStorage.getItem('cheeseMode') === '1';
+let _edgePanelOpen = false;
 let _saveSimTimer = null;
 function saveSimData() {
   clearTimeout(_saveSimTimer);
@@ -167,7 +188,8 @@ function applyFocusView() {
     }
     simulation.velocityDecay(0.78);
   } else {
-    simulation.nodes().forEach(n => { n.fx = null; n.fy = null; });
+    if (!floatMode) simulation.nodes().forEach(n => { n.fx = n.x; n.fy = n.y; });
+    else simulation.nodes().forEach(n => { n.fx = null; n.fy = null; });
     simulation.force('x', null).force('y', null);
     simulation.force('boundary', makeBoundaryForce());
     simulation.force('link').distance(d => {
@@ -176,8 +198,15 @@ function applyFocusView() {
     });
     simulation.velocityDecay(0.4);
   }
-  simulation.alpha(0.5).alphaDecay(0.007).restart();
+  if (floatMode) {
+    simulation.alpha(0.5).alphaDecay(0.007).restart();
+  } else {
+    simulation.stop();
+    ticked();
+  }
   updateVisualScales();
+  _syncGraphOptionsBtn();
+  if (isolatedNodes !== null) applyIsolationView();
 }
 
 function updateVisualScales() {
@@ -243,6 +272,84 @@ function zoomToEdge(id) {
       .scale(targetK)
       .translate(-mx, -my)
   );
+}
+
+function pointInPolygon(px, py, points) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const xi = points[i][0], yi = points[i][1];
+    const xj = points[j][0], yj = points[j][1];
+    if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+export function setLassoMode(mode) {
+  lassoMode = mode;
+  document.querySelectorAll('#lasso-filter .lasso-opt').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === mode);
+  });
+}
+
+export function openLassoFilter() {
+  document.getElementById('btn-lasso-type').classList.add('lasso-hidden');
+  const filter = document.getElementById('lasso-filter');
+  filter.classList.add('open');
+  filter.querySelectorAll('.lasso-opt').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === lassoMode);
+  });
+}
+
+export function closeLassoFilter() {
+  document.getElementById('lasso-filter').classList.remove('open');
+  document.getElementById('btn-lasso-type').classList.remove('lasso-hidden');
+}
+
+export function openGraphOptions() {
+  document.getElementById('btn-graph-options').classList.add('lasso-hidden');
+  document.getElementById('graph-options-menu').classList.add('open');
+}
+
+export function closeGraphOptions() {
+  document.getElementById('graph-options-menu').classList.remove('open');
+  if (!attachMode && !isolatedNodes && focusDistances === null && !_deepFocusActive)
+    document.getElementById('btn-graph-options').classList.remove('lasso-hidden');
+}
+
+function _syncGraphOptionsBtn() {
+  const inNormalView = !attachMode && !isolatedNodes && focusDistances === null && !_deepFocusActive;
+  // Add Idea visible in normal, attach, and isolation; hidden in focus/deep focus/edge panel
+  const showToolbar  = focusDistances === null && !_deepFocusActive && !_edgePanelOpen;
+  // Attach + lasso hidden in focus mode or when edge panel is open
+  const hideFocusCtrl = focusDistances !== null || _deepFocusActive || _edgePanelOpen;
+
+  const graphOptBtn = document.getElementById('btn-graph-options');
+  if (graphOptBtn) {
+    if (inNormalView && !_edgePanelOpen) {
+      graphOptBtn.classList.remove('lasso-hidden');
+    } else {
+      graphOptBtn.classList.add('lasso-hidden');
+      document.getElementById('graph-options-menu').classList.remove('open');
+    }
+  }
+  document.getElementById('btn-add-idea')?.classList.toggle('lasso-hidden', !showToolbar || _edgePanelOpen);
+  document.getElementById('btn-attach')?.classList.toggle('lasso-hidden', hideFocusCtrl);
+  document.getElementById('btn-lasso-type')?.classList.toggle('lasso-hidden', hideFocusCtrl);
+}
+
+export function toggleFloatMode() {
+  floatMode = !floatMode;
+  const btn = document.getElementById('btn-float-toggle');
+  if (btn) { btn.textContent = floatMode ? '⟡ Float: On' : '⟡ Float: Off'; btn.classList.toggle('float-off', !floatMode); }
+  if (floatMode) {
+    if (_bendAnimId !== null) { cancelAnimationFrame(_bendAnimId); _bendAnimId = null; }
+    simulation.nodes().forEach(n => { n.fx = null; n.fy = null; });
+    simulation.alpha(0.3).restart(); // simulation drives ticked()
+  } else {
+    simulation.nodes().forEach(n => { n.fx = n.x; n.fy = n.y; n.vx = 0; n.vy = 0; });
+    simulation.stop();
+    _startBendAnim();
+  }
 }
 
 export function initGraph() {
@@ -342,8 +449,14 @@ export function initGraph() {
       svgRoot.select('#grid-pattern').attr('patternTransform', e.transform);
       currentK = e.transform.k;
       updateVisualScales();
+      const slider = document.getElementById('zoom-slider');
+      if (slider && document.activeElement !== slider) slider.value = e.transform.k;
     });
   svgRoot.call(zoomBehavior);
+
+  document.getElementById('zoom-slider')?.addEventListener('input', function() {
+    svgRoot.transition().duration(0).call(zoomBehavior.scaleTo, +this.value);
+  });
 
   let _panVx = 0, _panVy = 0, _panPrevX = 0, _panPrevY = 0;
   let _inertiaRaf = null, _isPanning = false, _inertiaActive = false;
@@ -417,6 +530,7 @@ export function initGraph() {
       return;
     }
     if (e.target === svgRoot.node() || e.target.id === 'grid-bg') {
+      if (isolatedNodes !== null) return;
       deselectAll();
     }
   });
@@ -484,6 +598,10 @@ export function initGraph() {
       };
     }
     await loadData();
+    if (isolatedNodes !== null) {
+      isolatedNodes.add(newNode.id);
+      applyIsolationView();
+    }
     showNodeResult(newNode.id);
   };
 
@@ -494,52 +612,121 @@ export function initGraph() {
     e.preventDefault();
 
     const x0 = e.clientX, y0 = e.clientY;
-    const overlay = document.createElement('div');
-    Object.assign(overlay.style, {
-      position: 'absolute', border: '1.5px dashed #fbbf24',
-      background: 'rgba(251,191,36,0.08)', pointerEvents: 'none', zIndex: '99',
-    });
     const containerEl = document.getElementById('graph-container');
-    containerEl.appendChild(overlay);
-
     const containerRect = containerEl.getBoundingClientRect();
-    const onMove = (mv) => {
-      overlay.style.left   = Math.min(x0, mv.clientX) - containerRect.left + 'px';
-      overlay.style.top    = Math.min(y0, mv.clientY) - containerRect.top  + 'px';
-      overlay.style.width  = Math.abs(mv.clientX - x0) + 'px';
-      overlay.style.height = Math.abs(mv.clientY - y0) + 'px';
-    };
 
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      const lassoBox = overlay.getBoundingClientRect();
-      overlay.remove();
-
-      if (lassoBox.width > 4 || lassoBox.height > 4) {
-        _suppressClick = true;
-        gZoom.select('.nodes-layer').selectAll('.g-node').each(function(d) {
-          const hidden = focusDistances && focusDistances[d.id] === undefined;
-          if (hidden) return;
-          const nb = this.getBoundingClientRect();
-          const cx = nb.left + nb.width / 2, cy = nb.top + nb.height / 2;
-          if (cx >= lassoBox.left && cx <= lassoBox.right &&
-              cy >= lassoBox.top  && cy <= lassoBox.bottom) {
-            multiSelected.add(d.id);
-            if (!selectionListOrder.includes(d.id)) selectionListOrder.push(d.id);
-          }
-        });
-        if (multiSelected.size > 0 && selectedId) {
-          selectedId = null; selectedType = null; focusDistances = null;
-          document.getElementById('graph-detail-panel').style.display = 'none';
-          applyFocusView();
+    const finishSelection = (testFn) => {
+      _suppressClick = true;
+      gZoom.select('.nodes-layer').selectAll('.g-node').each(function(d) {
+        const hidden = focusDistances && focusDistances[d.id] === undefined;
+        if (hidden) return;
+        const nb = this.getBoundingClientRect();
+        const cx = nb.left + nb.width / 2, cy = nb.top + nb.height / 2;
+        if (testFn(cx, cy)) {
+          multiSelected.add(d.id);
+          if (!selectionListOrder.includes(d.id)) selectionListOrder.push(d.id);
         }
-        refreshSelectionClasses();
+      });
+      if (multiSelected.size > 0 && selectedId) {
+        selectedId = null; selectedType = null; focusDistances = null;
+        document.getElementById('graph-detail-panel').style.display = 'none';
+        applyFocusView();
       }
+      refreshSelectionClasses();
     };
 
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    if (lassoMode === 'rect') {
+      const overlay = document.createElement('div');
+      Object.assign(overlay.style, {
+        position: 'absolute', border: '1.5px dashed #fbbf24',
+        background: 'rgba(251,191,36,0.08)', pointerEvents: 'none', zIndex: '99',
+      });
+      containerEl.appendChild(overlay);
+      const onMove = (mv) => {
+        overlay.style.left   = Math.min(x0, mv.clientX) - containerRect.left + 'px';
+        overlay.style.top    = Math.min(y0, mv.clientY) - containerRect.top  + 'px';
+        overlay.style.width  = Math.abs(mv.clientX - x0) + 'px';
+        overlay.style.height = Math.abs(mv.clientY - y0) + 'px';
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        const lassoBox = overlay.getBoundingClientRect();
+        overlay.remove();
+        if (lassoBox.width > 4 || lassoBox.height > 4) {
+          finishSelection((cx, cy) =>
+            cx >= lassoBox.left && cx <= lassoBox.right &&
+            cy >= lassoBox.top  && cy <= lassoBox.bottom);
+        }
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+
+    } else {
+      // Freeform lasso — fill appears only when mouse returns near start
+      const CLOSE_R = 22;
+      const points = [[x0, y0]];
+      let curX = x0, curY = y0;
+
+      const lassoSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      Object.assign(lassoSvg.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', pointerEvents: 'none', zIndex: '99' });
+
+      const fillPoly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      fillPoly.setAttribute('fill', 'rgba(251,191,36,0.10)');
+      fillPoly.setAttribute('stroke', 'none');
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      line.setAttribute('fill', 'none');
+      line.setAttribute('stroke', '#fbbf24');
+      line.setAttribute('stroke-width', '1.5');
+      line.setAttribute('stroke-dasharray', '5,3');
+      line.setAttribute('stroke-linecap', 'round');
+      const closeSeg = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      closeSeg.setAttribute('stroke', 'rgba(251,191,36,0.3)');
+      closeSeg.setAttribute('stroke-width', '1');
+      closeSeg.setAttribute('stroke-dasharray', '3,4');
+
+      lassoSvg.appendChild(fillPoly);
+      lassoSvg.appendChild(closeSeg);
+      lassoSvg.appendChild(line);
+      containerEl.appendChild(lassoSvg);
+
+      const toLocal = ([cx, cy]) => `${cx - containerRect.left},${cy - containerRect.top}`;
+      const ptStr = () => points.map(toLocal).join(' ');
+
+      const redraw = () => {
+        const dx = curX - x0, dy = curY - y0;
+        const nearStart = points.length > 4 && dx * dx + dy * dy < CLOSE_R * CLOSE_R;
+        line.setAttribute('points', nearStart ? ptStr() : ptStr() + ' ' + toLocal([curX, curY]));
+        if (nearStart) {
+          fillPoly.setAttribute('points', ptStr());
+          fillPoly.style.display = '';
+          closeSeg.style.display = 'none';
+        } else {
+          fillPoly.style.display = 'none';
+          closeSeg.setAttribute('x1', curX - containerRect.left);
+          closeSeg.setAttribute('y1', curY - containerRect.top);
+          closeSeg.setAttribute('x2', x0 - containerRect.left);
+          closeSeg.setAttribute('y2', y0 - containerRect.top);
+          closeSeg.style.display = '';
+        }
+      };
+
+      const onMove = (mv) => {
+        curX = mv.clientX; curY = mv.clientY;
+        const last = points[points.length - 1];
+        const dx = curX - last[0], dy = curY - last[1];
+        if (dx * dx + dy * dy >= 25) points.push([curX, curY]);
+        redraw();
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        lassoSvg.remove();
+        if (points.length > 3) finishSelection((cx, cy) => pointInPolygon(cx, cy, points));
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    }
   });
 
   simulation = d3.forceSimulation()
@@ -751,17 +938,121 @@ export function renderGraph() {
     Object.entries(vars).forEach(([k, v]) => el.style(k, v));
   });
 
+  nodeGs.classed('subject-node', d => nodes[d.id]?.node_type === 'Subject');
   nodeGs.select('text').text(d => d.title);
 
   simulation.nodes(simNodes);
   simulation.force('link').links(simEdges);
-  simulation.alpha(0.3).restart();
+  _initEdgeBends(simEdges);
+  if (floatMode) {
+    simulation.alpha(0.3).restart(); // simulation drives ticked(), which steps bends
+    ticked(); // immediately apply updated bend state (don't wait for first sim tick)
+  } else {
+    simulation.nodes().forEach(n => { n.fx = n.x; n.fy = n.y; n.vx = 0; n.vy = 0; });
+    simulation.stop();
+    _startBendAnim(); // no simulation — drive ticked() via rAF until bends settle
+  }
   updateVisualScales();
 
   if (_attachSource) {
     const fresh = simulation.nodes().find(n => n.id === _attachSource.id);
     if (fresh) _attachSource = fresh;
   }
+  if (isolatedNodes !== null) applyIsolationView();
+}
+
+// ---- Parallel-edge bend physics ----
+
+function _initEdgeBends(edgeData) {
+  // Remove stale entries
+  const edgeIds = new Set(edgeData.map(e => e.id));
+  for (const k of _edgeBends.keys()) { if (!edgeIds.has(k)) _edgeBends.delete(k); }
+
+  // Build pair groups
+  const pairGroups = new Map();
+  for (const e of edgeData) {
+    const key = e.node_a_id < e.node_b_id ? `${e.node_a_id}|${e.node_b_id}` : `${e.node_b_id}|${e.node_a_id}`;
+    if (!pairGroups.has(key)) pairGroups.set(key, []);
+    pairGroups.get(key).push(e);
+  }
+
+  // Track which edges are actually in parallel pairs
+  const paired = new Set();
+  pairGroups.forEach(group => {
+    if (group.length < 2) return;
+    group.sort((a, b) => a.id < b.id ? -1 : 1);
+    group.forEach((e, idx) => {
+      paired.add(e.id);
+      if (!_edgeBends.has(e.id)) {
+        const initOffset = (idx - (group.length - 1) / 2) * 55;
+        _edgeBends.set(e.id, { offset: initOffset, vel: 0 });
+      }
+    });
+  });
+
+  // Remove bends for edges no longer in a parallel pair
+  for (const k of _edgeBends.keys()) { if (!paired.has(k)) _edgeBends.delete(k); }
+  _bendSettled = false;
+}
+
+function _stepEdgeBends() {
+  if (_edgeBends.size === 0) { _bendSettled = true; return; }
+
+  const pairGroups = new Map();
+  if (gZoom) {
+    gZoom.select('.edges-layer').selectAll('.g-edge').each(function(d) {
+      if (!_edgeBends.has(d.id)) return;
+      const key = d.node_a_id < d.node_b_id ? `${d.node_a_id}|${d.node_b_id}` : `${d.node_b_id}|${d.node_a_id}`;
+      if (!pairGroups.has(key)) pairGroups.set(key, []);
+      pairGroups.get(key).push(d.id);
+    });
+  }
+
+  const REPEL_MIN = 52;
+  const DAMPING   = 0.82;
+
+  pairGroups.forEach(ids => {
+    // Repulsion only — no spring toward center (spring fights separation)
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const bi = _edgeBends.get(ids[i]);
+        const bj = _edgeBends.get(ids[j]);
+        if (!bi || !bj) continue;
+        const diff = bi.offset - bj.offset;
+        const dist = Math.abs(diff) || 0.01;
+        if (dist < REPEL_MIN) {
+          const force = (REPEL_MIN - dist) * 0.6;
+          const sign  = diff >= 0 ? 1 : -1;
+          bi.vel += sign * force;
+          bj.vel -= sign * force;
+        }
+      }
+    }
+    // Integrate
+    ids.forEach(id => {
+      const b = _edgeBends.get(id);
+      if (!b) return;
+      b.offset += b.vel;
+      b.vel    *= DAMPING;
+    });
+  });
+
+  let moving = false;
+  _edgeBends.forEach(b => { if (Math.abs(b.vel) > 0.05) moving = true; });
+  _bendSettled = !moving;
+}
+
+// Only used when float mode is off (simulation stopped — drives ticked() via rAF).
+// When float mode is on the simulation's own tick calls ticked(), which steps bends inline.
+function _startBendAnim() {
+  if (_bendAnimId !== null) cancelAnimationFrame(_bendAnimId);
+  _bendAnimId = null;
+  if (_edgeBends.size === 0) { ticked(); return; }
+  function step() {
+    ticked(); // ticked() calls _stepEdgeBends() internally
+    _bendAnimId = _bendSettled ? null : requestAnimationFrame(step);
+  }
+  _bendAnimId = requestAnimationFrame(step);
 }
 
 function ticked() {
@@ -775,6 +1066,19 @@ function ticked() {
       if (tip) ghost.attr('x1', _attachSource.x ?? 0).attr('y1', _attachSource.y ?? 0)
                     .attr('x2', tip.x).attr('y2', tip.y);
     }
+  }
+
+  // Build parallel-edge groups inline every tick — no external state dependency
+  const _pairGroups = new Map();
+  if (focusDistances === null) {
+    gZoom.select('.edges-layer').selectAll('.g-edge').each(function(d) {
+      const aId = (typeof d.source === 'object' ? d.source.id : null) ?? d.node_a_id ?? '';
+      const bId = (typeof d.target === 'object' ? d.target.id : null) ?? d.node_b_id ?? '';
+      const key = aId < bId ? `${aId}|${bId}` : `${bId}|${aId}`;
+      if (!_pairGroups.has(key)) _pairGroups.set(key, []);
+      _pairGroups.get(key).push(d.id);
+    });
+    _pairGroups.forEach(ids => ids.sort());
   }
 
   gZoom.select('.edges-layer').selectAll('.g-edge').each(function(d) {
@@ -792,30 +1096,51 @@ function ticked() {
 
     const arrow = d.bidirectional ? null : 'url(#arrow)';
     let pathD, labelX, labelY;
+
     if (focusDistances !== null) {
       pathD  = `M${x1},${y1} L${x2},${y2}`;
       labelX = (x1 + x2) / 2;
       labelY = (y1 + y2) / 2 - 9;
     } else {
-      const h  = String(d.id).split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0);
-      const h2 = (h * 1664525 + 1013904223) | 0;
-      const sign = (h & 1) ? 1 : -1;
-      const t    = Math.max(0, 1 - dist / 200);
-      const base = 5 + Math.abs(h % 10) + t * t * 460;
-      const curl = sign * t * t * Math.PI * 0.65;
-      const f2   = (Math.abs(h2 % 19) - 6) / 10;
-      const rot  = (θ, mag) => [
-        mag * ((-uy) * Math.cos(θ) - ux * Math.sin(θ)),
-        mag * ((-uy) * Math.sin(θ) + ux * Math.cos(θ)),
-      ];
-      const [o1x, o1y] = rot(curl,      base);
-      const [o2x, o2y] = rot(curl * f2, base);
-      const cp1x = x1 + (x2-x1)*0.35 + o1x, cp1y = y1 + (y2-y1)*0.35 + o1y;
-      const cp2x = x1 + (x2-x1)*0.65 + o2x, cp2y = y1 + (y2-y1)*0.65 + o2y;
-      pathD  = `M${x1},${y1} C${cp1x},${cp1y} ${cp2x},${cp2y} ${x2},${y2}`;
-      labelX = 0.125*x1 + 0.375*cp1x + 0.375*cp2x + 0.125*x2;
-      labelY = 0.125*y1 + 0.375*cp1y + 0.375*cp2y + 0.125*y2 - 9;
+      const aId2    = (typeof d.source === 'object' ? d.source.id : null) ?? d.node_a_id ?? '';
+      const bId2    = (typeof d.target === 'object' ? d.target.id : null) ?? d.node_b_id ?? '';
+      const pairKey = aId2 < bId2 ? `${aId2}|${bId2}` : `${bId2}|${aId2}`;
+      const group = _pairGroups.get(pairKey) ?? [d.id];
+      const count = group.length;
+      const idx   = group.indexOf(d.id);
+      // Scale by zoom so separation stays ~30 screen-pixels regardless of zoom level
+      const SPACING    = 30 / currentK;
+      const baseOffset = (idx - (count - 1) / 2) * SPACING;
+      // Physics layer adds a small dynamic adjustment on top
+      const physOffset = _edgeBends.get(d.id)?.offset ?? 0;
+      const offset     = baseOffset + physOffset;
+      // Debug — remove once working
+      if (Math.abs(offset) < 0.5) {
+        pathD  = `M${x1},${y1} L${x2},${y2}`;
+        labelX = (x1 + x2) / 2;
+        labelY = (y1 + y2) / 2 - 9;
+      } else {
+        // Canonical perpendicular: always from smaller-ID node → larger-ID node
+        // so both parallel edges use the same direction regardless of source/target order
+        const [canonA, canonB] = (d.source?.id ?? '') < (d.target?.id ?? '')
+          ? [d.source, d.target] : [d.target, d.source];
+        const caDx = (canonB?.x ?? 0) - (canonA?.x ?? 0);
+        const caDy = (canonB?.y ?? 0) - (canonA?.y ?? 0);
+        const caL  = Math.sqrt(caDx * caDx + caDy * caDy) || 1;
+        const px   = -caDy / caL;
+        const py   =  caDx / caL;
+        const cpX  = (x1 + x2) / 2 + px * offset;
+        const cpY  = (y1 + y2) / 2 + py * offset;
+        pathD  = `M${x1},${y1} Q${cpX},${cpY} ${x2},${y2}`;
+        labelX = 0.25 * x1 + 0.5 * cpX + 0.25 * x2;
+        labelY = 0.25 * y1 + 0.5 * cpY + 0.25 * y2 - 9;
+      }
     }
+
+    // Apply per-edge color via CSS custom property
+    const colorIdx = nodeSimData[d.id]?.colorIdx ?? 0;
+    const edgeColor = EDGE_PALETTE[colorIdx]?.color ?? EDGE_PALETTE[0].color;
+    d3.select(this).style('--edge-color', edgeColor);
 
     d3.select(this).select('.edge-hit').attr('d', pathD);
     d3.select(this).select('.edge-line').attr('d', pathD).attr('marker-end', arrow);
@@ -837,6 +1162,7 @@ function ticked() {
     }
   });
   saveSimData();
+  _stepEdgeBends(); // advance bend physics each render frame
 }
 
 // ---- Attach mode state ----
@@ -857,6 +1183,43 @@ let _clearSourceTimer = null;
 let _enterKeyDown = false;
 document.addEventListener('keydown', (e) => { if (e.key === 'Enter') _enterKeyDown = true;  }, true);
 document.addEventListener('keyup',   (e) => { if (e.key === 'Enter') _enterKeyDown = false; }, true);
+
+let _mouseClientX = 0, _mouseClientY = 0;
+document.addEventListener('mousemove', e => { _mouseClientX = e.clientX; _mouseClientY = e.clientY; });
+
+document.addEventListener('keydown', async (e) => {
+  if (e.key !== 'n') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+  e.preventDefault();
+  if (_nodeResultStack.length >= 10) return;
+  const svgEl = svgRoot.node();
+  const rect = svgEl.getBoundingClientRect();
+  if (_mouseClientX < rect.left || _mouseClientX > rect.right || _mouseClientY < rect.top || _mouseClientY > rect.bottom) return;
+  const tr = d3.zoomTransform(svgEl);
+  const simX = (_mouseClientX - rect.left - tr.x) / tr.k;
+  const simY = (_mouseClientY - rect.top  - tr.y) / tr.k;
+  const res = await fetch(`${API}/nodes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'New Idea', body: null }),
+  });
+  if (!res.ok) return;
+  const newNode = await res.json();
+  _pendingNodePos = { id: newNode.id, x: simX, y: simY };
+  if (attachMode && _attachSource) {
+    const sourceId = _attachSource.id;
+    _pendingTargetNodeId = newNode.id;
+    _nodeResultOnEnter = async (newNodeId) => { await createEdgeDirect(sourceId, newNodeId, false); };
+  } else if (attachMode) {
+    _nodeResultOnEnter = async (newNodeId) => { enterAttachFrom(newNodeId); };
+  }
+  await loadData();
+  if (isolatedNodes !== null) {
+    isolatedNodes.add(newNode.id);
+    applyIsolationView();
+  }
+  showNodeResult(newNode.id);
+});
 
 let _autoPanRaf = null;
 let _autoPanVx = 0, _autoPanVy = 0;
@@ -992,7 +1355,7 @@ export function enterAttachFrom(nodeId) {
   document.getElementById('attach-go-back').classList.add('visible');
 }
 
-export function toggleAttachMode() {
+export function toggleAttachMode(hideEscHint = false) {
   attachMode = !attachMode;
   document.getElementById('btn-attach').classList.toggle('active', attachMode);
   document.getElementById('graph-container').classList.toggle('attach-mode', attachMode);
@@ -1006,7 +1369,7 @@ export function toggleAttachMode() {
     selectionListOrder = [];
     refreshSelectionClasses();
     hint.classList.add('visible');
-    escHint.classList.add('visible');
+    if (!hideEscHint) escHint.classList.add('visible');
     _attachHintTimer = setTimeout(() => { hint.classList.remove('visible'); escHint.classList.remove('visible'); }, 5000);
     _attachShiftListener = (ev) => {
       if (ev.key === 'Shift') {
@@ -1031,6 +1394,15 @@ export function toggleAttachMode() {
     if (_panelStateBeforeAttach) {
       const saved = _panelStateBeforeAttach;
       _panelStateBeforeAttach = null;
+      if (saved.type === 'node') {
+        selectedId   = saved.id;
+        selectedType = 'node';
+        savedZoom    = d3.zoomTransform(svgRoot.node());
+        focusDistances = computeDistances(saved.id);
+        refreshSelectionClasses();
+        applyFocusView();
+        zoomToNode(saved.id);
+      }
       showDetailPanel(saved.type, saved.id, null);
       if (saved.activeTab) {
         const btn = document.querySelector(`#detail-content .detail-tab-btn[data-tab="${saved.activeTab}"]`);
@@ -1042,10 +1414,12 @@ export function toggleAttachMode() {
       _attachShiftListener = null;
     }
   }
+  _syncGraphOptionsBtn();
 }
 
 function showAttachResult(edgeId, onComplete) {
   clearTimeout(_attachResultTimer);
+  if (_attachHeld) { _attachHeld = false; if (attachMode) toggleAttachMode(); }
   document.getElementById('attach-hint').classList.remove('visible');
   document.getElementById('node-hover-label').classList.remove('visible');
   _ghostHidden = true;
@@ -1074,7 +1448,8 @@ function showAttachResult(edgeId, onComplete) {
   input.onkeydown = async (e) => {
     if (e.key === 'Enter' && _enterReady) {
       await saveDesc();
-      showToast('Link created!');
+      showToast('Connection created!');
+      const _e = edges[edgeId]; if (_e) { const _sym = _e.bidirectional ? '↔' : '→'; addHistory(`Connected "${nodes[_e.node_a_id]?.title}" ${_sym} "${nodes[_e.node_b_id]?.title}"`, '⊕'); }
       hideAttachResult();
       _ghostHidden = false;
       if (onComplete) await onComplete();
@@ -1165,6 +1540,7 @@ export function showNodeResult(nodeId) {
       const onEnter = _nodeResultOnEnter;
       await saveTitle();
       showToast('Idea created!');
+      addHistory(`Added "${input.value.trim() || 'New Idea'}"`, '✦');
       hideNodeResult();
       if (onEnter && id) await onEnter(id);
     }
@@ -1180,6 +1556,7 @@ export function showNodeResult(nodeId) {
   document.getElementById('node-undo-btn').onclick = async () => {
     const id = _nodeResultStack.pop();
     if (!id) return;
+    isolatedNodes?.delete(id);
     await fetch(`${API}/nodes/${id}`, { method: 'DELETE' });
     loadData();
     if (_nodeResultStack.length > 0) { showNodeResult(); } else { hideNodeResult(); }
@@ -1227,6 +1604,7 @@ export async function createEdgeDirect(fromId, toId, bidirectional) {
     const savedTab = _panelStateBeforeAttach?.activeTab ?? null;
     clearRewireState();
     showToast('Connection moved!');
+    addHistory(`Reconnected "${nodes[toId]?.title}"`, '⇌');
     _panelStateBeforeAttach = null;
     toggleAttachMode();
     await loadData();
@@ -1244,7 +1622,6 @@ export async function createEdgeDirect(fromId, toId, bidirectional) {
     loadData();
     showAttachResult(edge.id, async () => {
       _panelStateBeforeAttach = null;
-      toggleAttachMode();
       await loadData();
       showDetailPanel('node', nodeId, null);
       if (savedTab) document.querySelector(`#detail-content .detail-tab-btn[data-tab="${savedTab}"]`)?.click();
@@ -1272,7 +1649,7 @@ function dragBehavior() {
         _dragAttachX0 = e.x; _dragAttachY0 = e.y;
         return;
       }
-      if (!e.active) simulation.alphaTarget(0.3).restart();
+      if (floatMode && !e.active) simulation.alphaTarget(0.3).restart();
       d.fx = d.x; d.fy = d.y;
       trash().classList.add('visible');
     })
@@ -1305,7 +1682,16 @@ function dragBehavior() {
         if (e.sourceEvent) _updateAutoPan(e.sourceEvent.clientX, e.sourceEvent.clientY);
         return;
       }
-      d.fx = e.x; d.fy = e.y;
+      if (floatMode) {
+        d.fx = e.x; d.fy = e.y;
+      } else {
+        const t = d3.zoomTransform(svgRoot.node());
+        const px = 10 / t.k;
+        d.fx = Math.max(t.invertX(0) + px, Math.min(t.invertX(graphW) - px, e.x));
+        d.fy = Math.max(t.invertY(0) + px, Math.min(t.invertY(graphH) - px, e.y));
+        d.x = d.fx; d.y = d.fy;
+        ticked();
+      }
       trash().classList.toggle('danger', isOverTrash(e.sourceEvent));
     })
     .on('end', async (e, d) => {
@@ -1319,7 +1705,14 @@ function dragBehavior() {
         _dragAttachNode = null; _dragAttachLive = false;
         return;
       }
-      if (!e.active) simulation.alphaTarget(0);
+      if (!e.active) {
+        if (floatMode) {
+          simulation.alphaTarget(0);
+        } else {
+          simulation.nodes().forEach(n => { n.vx = 0; n.vy = 0; });
+          simulation.stop();
+        }
+      }
       hoveredNodeId = null;
       document.getElementById('node-hover-label').classList.remove('visible');
       trash().classList.remove('visible', 'danger');
@@ -1338,7 +1731,9 @@ function dragBehavior() {
           deleteNode(d.id);
         }
       } else {
-        d.fx = null; d.fy = null;
+        if (floatMode) {
+          d.fx = null; d.fy = null;
+        }
       }
     });
 }
@@ -1381,6 +1776,16 @@ function selectEdge(id, event) {
   zoomToEdge(id);
 }
 
+export function selectNodeById(id) {
+  if (window.switchView) window.switchView('graph');
+  selectNode(id, null);
+}
+
+export function selectEdgeById(id) {
+  if (window.switchView) window.switchView('graph');
+  selectEdge(id, null);
+}
+
 export function deselectAll() {
   if (_deepFocusActive) {
     _deepFocusActive = false;
@@ -1393,6 +1798,7 @@ export function deselectAll() {
   selectedId     = null;
   selectedType   = null;
   focusDistances = null;
+  _edgePanelOpen = false;
   multiSelected.clear();
   selectionListOrder = [];
   refreshSelectionClasses();
@@ -1465,6 +1871,8 @@ export function isolateSelected() {
   savedZoomIsolation = d3.zoomTransform(svgRoot.node());
   isolatedNodes = new Set([...multiSelected]);
   focusDistances = null; selectedId = null; selectedType = null;
+  multiSelected.clear();
+  selectionListOrder = [];
   document.getElementById('graph-detail-panel').style.display = 'none';
   applyFocusView();
   applyIsolationView();
@@ -1479,6 +1887,7 @@ export function exitIsolation() {
     savedZoomIsolation = null;
   }
   refreshSelectionClasses();
+  _syncGraphOptionsBtn();
 }
 
 function applyIsolationView() {
@@ -1503,12 +1912,26 @@ function applyIsolationView() {
 
 // ---- Detail Panel ----
 
+let _dirChangeUnlocked = false;
+let _rewireUnlocked = false;
+let _edgeRewireUnlocked = false;
+let _edgeDirUnlocked = false;
+
 export function showDetailPanel(type, id, event) {
   const panel   = document.getElementById('graph-detail-panel');
   const content = document.getElementById('detail-content');
   panel.style.display = '';
+  if (panel._connRo) { panel._connRo.disconnect(); panel._connRo = null; }
+  _dirChangeUnlocked = false;
+  _rewireUnlocked = false;
+  _edgeRewireUnlocked = false;
+  _edgeDirUnlocked = false;
+  _edgePanelOpen = (type === 'edge');
+  _syncGraphOptionsBtn();
 
   if (type === 'node') {
+    panel.classList.remove('panel-edge');
+    if (!panel.style.height) panel.style.height = panel.offsetHeight + 'px';
     const n = nodes[id];
     const connEdges = Object.values(edges).filter(e => e.node_a_id === id || e.node_b_id === id);
     const connRows = connEdges.map(e => {
@@ -1517,16 +1940,17 @@ export function showDetailPanel(type, id, event) {
       const dir        = e.bidirectional ? '↔' : (e.source_id === id ? '→' : '←');
       return `<div class="detail-conn-row" data-edge-id="${e.id}" data-other-id="${otherId}">
         <span class="detail-conn-dir" title="Click to change direction">${dir}</span>
-        <span class="detail-conn-node" title="Click to rename">${otherTitle}</span>
+        <span class="detail-conn-node" title="Click to reconnect">${otherTitle}</span>
         <span class="detail-conn-label${e.body ? '' : ' detail-conn-label-empty'}" title="Click to edit label">${e.body || 'add label…'}</span>
         <button class="detail-conn-delete" title="Delete connection">×</button>
       </div>`;
     }).join('');
     content.innerHTML = `
+      ${n.node_type === 'Subject' ? '<span class="detail-subject-badge">Subject</span>' : ''}
       <h4 class="editable-title" title="Click to edit title">${n.title}</h4>
       <div class="detail-tab-bar">
         <button class="detail-tab-btn active" data-tab="notes">Notes</button>
-        <button class="detail-tab-btn" data-tab="links">Links${connEdges.length ? ` (${connEdges.length})` : ''}</button>
+        <button class="detail-tab-btn" data-tab="links">Connections${connEdges.length ? ` (${connEdges.length})` : ''}</button>
       </div>
       <div class="detail-tab-pane active" data-tab="notes">
         <p class="editable-body${n.body ? '' : ' detail-body-empty'}" title="Click to edit"></p>
@@ -1535,7 +1959,7 @@ export function showDetailPanel(type, id, event) {
         ${connEdges.length
           ? `<div class="detail-connections">${connRows}</div>`
           : `<p class="detail-no-connections">No connections yet!</p>`}
-        <button class="detail-create-link-btn" data-node-id="${id}">+ Create link</button>
+        <button class="detail-create-link-btn" data-node-id="${id}">+ Create connection</button>
       </div>
     `;
 
@@ -1557,22 +1981,31 @@ export function showDetailPanel(type, id, event) {
     }
 
     const titleEl = content.querySelector('.editable-title');
-    titleEl.addEventListener('click', () => {
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.value = nodes[id].title;
+    titleEl.addEventListener('click', (ev) => {
+      const input = document.createElement('div');
+      input.contentEditable = 'true';
+      input.textContent = nodes[id].title;
       input.className = 'inline-title-input';
       titleEl.replaceWith(input);
+      // place cursor at click position rather than selecting all
       input.focus();
-      input.select();
+      let range;
+      if (document.caretPositionFromPoint) {
+        const pos = document.caretPositionFromPoint(ev.clientX, ev.clientY);
+        if (pos) { range = document.createRange(); range.setStart(pos.offsetNode, pos.offset); range.collapse(true); }
+      } else if (document.caretRangeFromPoint) {
+        range = document.caretRangeFromPoint(ev.clientX, ev.clientY);
+      }
+      if (range) { const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
       let saved = false;
       const save = async () => {
         if (saved) return;
         saved = true;
-        const newTitle = input.value.trim();
+        const newTitle = input.textContent.trim();
         if (!newTitle || newTitle === nodes[id].title) { input.replaceWith(titleEl); return; }
         const ok = await apiRequest('PATCH', `${API}/nodes/${id}`, { title: newTitle });
         if (!ok) { saved = false; input.replaceWith(titleEl); return; }
+        addHistory(`Renamed "${nodes[id].title}" → "${newTitle}"`, '✎');
         nodes[id].title = newTitle;
         titleEl.textContent = newTitle;
         input.replaceWith(titleEl);
@@ -1589,7 +2022,7 @@ export function showDetailPanel(type, id, event) {
 
     const bodyEl = content.querySelector('.editable-body');
     if (n.body) bodyEl.innerHTML = n.body;
-    else bodyEl.textContent = '✏️ Click to add notes…';
+    else bodyEl.textContent = 'Click to add notes…';
 
     bodyEl.addEventListener('click', () => {
       const editor = document.createElement('div');
@@ -1609,18 +2042,32 @@ export function showDetailPanel(type, id, event) {
       sel.removeAllRanges();
       sel.addRange(range);
 
+      const fitEditor = () => {
+        const footer = panel.querySelector('.detail-footer');
+        if (!footer || !editor.isConnected) return;
+        const editorTop = editor.getBoundingClientRect().top;
+        const footerTop = footer.getBoundingClientRect().top;
+        const available = footerTop - editorTop - 12;
+        editor.style.height = Math.max(80, available) + 'px';
+      };
+      requestAnimationFrame(fitEditor);
+      const ro = new ResizeObserver(fitEditor);
+      ro.observe(panel);
+
       let saved = false;
       const save = async () => {
         if (saved) return;
         saved = true;
+        ro.disconnect();
         const newBody = editor.innerHTML.replace(/<br\s*\/?>/gi, '<br>').trim();
         const clean = newBody === '<br>' ? null : (newBody || null);
         if (clean === (nodes[id].body || null)) { editor.replaceWith(bodyEl); return; }
         const ok = await apiRequest('PATCH', `${API}/nodes/${id}`, { body: clean });
         if (!ok) { saved = false; editor.replaceWith(bodyEl); return; }
+        addHistory(`Edited notes for "${nodes[id].title}"`, '✎');
         nodes[id].body = clean;
         if (clean) bodyEl.innerHTML = clean;
-        else bodyEl.textContent = '✏️ Click to add notes…';
+        else bodyEl.textContent = 'Click to add notes…';
         bodyEl.classList.toggle('detail-body-empty', !clean);
         editor.replaceWith(bodyEl);
       };
@@ -1667,6 +2114,13 @@ export function showDetailPanel(type, id, event) {
       });
 
       row.querySelector('.detail-conn-dir').addEventListener('click', async () => {
+        if (!_dirChangeUnlocked) {
+          showConfirm('Change direction of this connection?', () => {
+            _dirChangeUnlocked = true;
+            row.querySelector('.detail-conn-dir').click();
+          }, { okLabel: 'Change', okClass: 'btn-secondary' });
+          return;
+        }
         const e = edges[edgeId];
         let newBidir, newSrc;
         if (e.bidirectional)          { newBidir = false; newSrc = id; }
@@ -1674,6 +2128,7 @@ export function showDetailPanel(type, id, event) {
         else                          { newBidir = true;  newSrc = null; }
         const ok = await apiRequest('PATCH', `${API}/edges/${edgeId}`, { bidirectional: newBidir, source_id: newSrc });
         if (!ok) return;
+        addHistory(`Changed direction: "${nodes[id]?.title}" ${newBidir ? '↔' : '→'} "${nodes[otherId]?.title}"`, '⇄');
         edges[edgeId].bidirectional = newBidir;
         edges[edgeId].source_id     = newSrc;
         row.querySelector('.detail-conn-dir').textContent = newBidir ? '↔' : (newSrc === id ? '→' : '←');
@@ -1685,35 +2140,90 @@ export function showDetailPanel(type, id, event) {
 
       const nodeEl = row.querySelector('.detail-conn-node');
       nodeEl.addEventListener('click', () => {
+        if (!_rewireUnlocked) {
+          showConfirm('Reconnect this connection to a different idea?', () => {
+            _rewireUnlocked = true;
+            nodeEl.click();
+          }, { okLabel: 'Reconnect', okClass: 'btn-secondary' });
+          return;
+        }
         const e = edges[edgeId];
         const field = e.node_a_id === otherId ? 'node_a_id' : 'node_b_id';
         enterRewireMode(edgeId, field, id, id);
       });
 
       const labelEl = row.querySelector('.detail-conn-label');
-      labelEl.addEventListener('click', () => {
-        const inp = document.createElement('input');
-        inp.className = 'detail-conn-input label-input'; inp.type = 'text';
-        inp.value = edges[edgeId]?.body || ''; inp.placeholder = 'label…';
-        labelEl.replaceWith(inp); inp.focus();
+      labelEl.addEventListener('click', (ev) => {
+        const inp = document.createElement('div');
+        inp.contentEditable = 'true'; inp.spellcheck = false;
+        inp.className = 'detail-conn-input label-input';
+        const dirW  = row.querySelector('.detail-conn-dir').offsetWidth;
+        const delW  = row.querySelector('.detail-conn-delete').offsetWidth;
+        const calcW = () => Math.max(40, (row.offsetWidth - dirW - delW - 18) / 2);
+        inp.style.width = calcW() + 'px';
+        const labelH = labelEl.offsetHeight;
+        if (labelH > 0) { inp.style.minHeight = labelH + 'px'; inp.style.whiteSpace = 'pre-wrap'; inp.style.overflowWrap = 'break-word'; }
+        inp.textContent = edges[edgeId]?.body || '';
+        if (!inp.textContent) inp.dataset.placeholder = 'label…';
+        labelEl.replaceWith(inp);
+        inp.focus();
+        const labelRo = new ResizeObserver(() => { inp.style.width = calcW() + 'px'; });
+        labelRo.observe(row);
+        let range;
+        if (document.caretPositionFromPoint) {
+          const pos = document.caretPositionFromPoint(ev.clientX, ev.clientY);
+          if (pos) { range = document.createRange(); range.setStart(pos.offsetNode, pos.offset); range.collapse(true); }
+        } else if (document.caretRangeFromPoint) {
+          range = document.caretRangeFromPoint(ev.clientX, ev.clientY);
+        }
+        if (range) { const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
         let saved = false;
         const save = async () => {
           if (saved) return; saved = true;
-          const val = inp.value.trim() || null;
+          const val = inp.textContent.trim() || null;
+          labelRo.disconnect();
           if (val === (edges[edgeId]?.body || null)) { inp.replaceWith(labelEl); return; }
           const ok = await apiRequest('PATCH', `${API}/edges/${edgeId}`, { body: val });
           if (!ok) { saved = false; inp.replaceWith(labelEl); return; }
+          if (val) addHistory(`Labeled "${nodes[id]?.title}"–"${nodes[otherId]?.title}": "${val}"`, '✎');
           edges[edgeId].body = val;
           labelEl.textContent = val || 'add label…';
           labelEl.classList.toggle('detail-conn-label-empty', !val);
           inp.replaceWith(labelEl);
         };
         inp.addEventListener('blur', save);
-        inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } if (e.key === 'Escape') { saved = true; inp.replaceWith(labelEl); } });
+        inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } if (e.key === 'Escape') { labelRo.disconnect(); saved = true; inp.replaceWith(labelEl); } });
       });
     });
+
+    // Multi-line connections rows: update clamp based on available height per row
+    const connListEl = content.querySelector('.detail-connections');
+    if (connListEl && connEdges.length) {
+      const updateConnLines = () => {
+        const pane = connListEl.closest('.detail-tab-pane');
+        if (!pane || !pane.classList.contains('active')) return;
+        const paneH = pane.offsetHeight;
+        const createBtn = content.querySelector('.detail-create-link-btn');
+        const createBtnH = createBtn ? createBtn.offsetHeight + 8 : 0;
+        const availH = paneH - createBtnH - connListEl.offsetTop;
+        const perRow = availH / connEdges.length;
+        connListEl.classList.remove('lines-2', 'lines-3');
+        if (perRow >= 52) connListEl.classList.add('lines-3');
+        else if (perRow >= 36) connListEl.classList.add('lines-2');
+      };
+      panel._connRo = new ResizeObserver(updateConnLines);
+      panel._connRo.observe(panel);
+      // Also update when switching to links tab
+      content.querySelectorAll('.detail-tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => setTimeout(updateConnLines, 0));
+      });
+    }
+
     document.getElementById('detail-edit-btn').style.display = 'none';
-    document.getElementById('detail-delete-btn').onclick = () => { deselectAll(); deleteNode(id); };
+    const isSubject = nodes[id]?.node_type === 'Subject';
+    const deleteBtn = document.getElementById('detail-delete-btn');
+    deleteBtn.style.display = isSubject ? 'none' : '';
+    deleteBtn.onclick = () => { deselectAll(); deleteNode(id); };
 
     const colorIdx = nodeSimData[id]?.colorIdx ?? 0;
     const swatchColor = i => `hsla(${NODE_PALETTE[i].h},${NODE_PALETTE[i].s + 10}%,${NODE_PALETTE[i].l + 14}%,0.92)`;
@@ -1748,6 +2258,8 @@ export function showDetailPanel(type, id, event) {
     });
 
   } else {
+    panel.classList.add('panel-edge');
+    panel.style.height = '';
     const e = edges[id];
     const aTitle = nodes[e.node_a_id]?.title ?? e.node_a_id;
     const bTitle = nodes[e.node_b_id]?.title ?? e.node_b_id;
@@ -1755,25 +2267,30 @@ export function showDetailPanel(type, id, event) {
     content.innerHTML = `
       <p class="editable-body${e.body ? '' : ' detail-body-empty'}" title="Click to edit label">${e.body || 'Add a label…'}</p>
       <div class="edge-direction-row">
-        <span class="edge-node-label" data-field="node_a_id" data-staying-id="${e.node_b_id}" title="Move this endpoint">${aTitle}</span>
+        <span class="edge-node-label" data-field="node_a_id" data-staying-id="${e.node_b_id}" title="Click to reconnect">${aTitle}</span>
         <span class="detail-conn-dir edge-dir-btn" title="Click to change direction">${dirSymbol()}</span>
-        <span class="edge-node-label" data-field="node_b_id" data-staying-id="${e.node_a_id}" title="Move this endpoint">${bTitle}</span>
+        <span class="edge-node-label" data-field="node_b_id" data-staying-id="${e.node_a_id}" title="Click to reconnect">${bTitle}</span>
       </div>
     `;
 
     const bodyEl = content.querySelector('.editable-body');
     bodyEl.addEventListener('click', () => {
-      const inp = document.createElement('input');
-      inp.type = 'text'; inp.className = 'inline-title-input';
-      inp.value = e.body || ''; inp.placeholder = 'Add a label…';
-      bodyEl.replaceWith(inp); inp.focus(); inp.select();
+      const inp = document.createElement('div');
+      inp.className = 'inline-edge-label-input';
+      inp.contentEditable = 'true'; inp.spellcheck = false;
+      inp.textContent = e.body || '';
+      bodyEl.replaceWith(inp); inp.focus();
+      // place cursor at end
+      const range = document.createRange(); range.selectNodeContents(inp); range.collapse(false);
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
       let saved = false;
       const save = async () => {
         if (saved) return; saved = true;
-        const val = inp.value.trim() || null;
+        const val = inp.textContent.trim() || null;
         if (val === (e.body || null)) { inp.replaceWith(bodyEl); return; }
         const ok = await apiRequest('PATCH', `${API}/edges/${id}`, { body: val });
         if (!ok) { saved = false; inp.replaceWith(bodyEl); return; }
+        if (val) addHistory(`Labeled "${nodes[e.node_a_id]?.title}"–"${nodes[e.node_b_id]?.title}": "${val}"`, '✎');
         edges[id].body = val;
         bodyEl.textContent = val || 'Add a label…';
         bodyEl.classList.toggle('detail-body-empty', !val);
@@ -1789,12 +2306,20 @@ export function showDetailPanel(type, id, event) {
 
     const dirBtn = content.querySelector('.edge-dir-btn');
     dirBtn.addEventListener('click', async () => {
+      if (!_edgeDirUnlocked) {
+        showConfirm('Change direction of this connection?', () => {
+          _edgeDirUnlocked = true;
+          dirBtn.click();
+        }, { okLabel: 'Change', okClass: 'btn-secondary' });
+        return;
+      }
       let newBidir, newSrc;
       if (e.bidirectional)                  { newBidir = false; newSrc = e.node_a_id; }
       else if (e.source_id === e.node_a_id) { newBidir = false; newSrc = e.node_b_id; }
       else                                  { newBidir = true;  newSrc = null; }
       const ok = await apiRequest('PATCH', `${API}/edges/${id}`, { bidirectional: newBidir, source_id: newSrc });
       if (!ok) return;
+      addHistory(`Changed direction: "${nodes[e.node_a_id]?.title}" ${newBidir ? '↔' : '→'} "${nodes[e.node_b_id]?.title}"`, '⇄');
       edges[id].bidirectional = newBidir;
       edges[id].source_id     = newSrc;
       dirBtn.textContent = dirSymbol();
@@ -1805,12 +2330,53 @@ export function showDetailPanel(type, id, event) {
     });
 
     content.querySelectorAll('.edge-node-label').forEach(lbl => {
-      lbl.addEventListener('click', () => enterRewireMode(id, lbl.dataset.field, lbl.dataset.stayingId));
+      lbl.addEventListener('click', () => {
+        if (!_edgeRewireUnlocked) {
+          showConfirm('Reconnect this connection to a different idea?', () => {
+            _edgeRewireUnlocked = true;
+            lbl.click();
+          }, { okLabel: 'Reconnect', okClass: 'btn-secondary' });
+          return;
+        }
+        enterRewireMode(id, lbl.dataset.field, lbl.dataset.stayingId);
+      });
     });
 
     document.getElementById('detail-edit-btn').style.display = 'none';
+    document.getElementById('detail-delete-btn').style.display = '';
     document.getElementById('detail-delete-btn').onclick = () => { deselectAll(); deleteEdge(id); };
-    document.getElementById('palette-dropdown-container').style.display = 'none';
+
+    const edgeColorIdx  = nodeSimData[id]?.colorIdx ?? 0;
+    const edgeSwatchClr = i => EDGE_PALETTE[i]?.color ?? EDGE_PALETTE[0].color;
+    const dropContainer = document.getElementById('palette-dropdown-container');
+    dropContainer.style.display = '';
+    dropContainer.innerHTML = `
+      <details class="palette-details">
+        <summary style="background:${edgeSwatchClr(edgeColorIdx)};" title="Change color"></summary>
+        <div class="palette-popup">
+          <div class="detail-palette">
+            ${EDGE_PALETTE.map((p, i) => `<button class="palette-swatch${i === edgeColorIdx ? ' active' : ''}" data-idx="${i}" title="${p.name}" style="background:${edgeSwatchClr(i)};"></button>`).join('')}
+          </div>
+        </div>
+      </details>
+    `;
+    const detailsEl = dropContainer.querySelector('.palette-details');
+    const summaryEl = dropContainer.querySelector('summary');
+    const paletteEl = dropContainer.querySelector('.detail-palette');
+    paletteEl.querySelectorAll('.palette-swatch').forEach(btn => {
+      btn.onclick = () => {
+        const idx = parseInt(btn.dataset.idx);
+        if (!nodeSimData[id]) nodeSimData[id] = {};
+        nodeSimData[id].colorIdx = idx;
+        saveSimData();
+        gZoom.select('.edges-layer').selectAll('.g-edge')
+          .filter(d => d.id === id)
+          .style('--edge-color', edgeSwatchClr(idx));
+        paletteEl.querySelectorAll('.palette-swatch').forEach(s => s.classList.toggle('active', parseInt(s.dataset.idx) === idx));
+        summaryEl.style.background = edgeSwatchClr(idx);
+        detailsEl.removeAttribute('open');
+      };
+    });
   }
 
   document.getElementById('btn-enter-focus').style.display = type === 'node' ? '' : 'none';
@@ -1818,7 +2384,7 @@ export function showDetailPanel(type, id, event) {
   if (event) {
     const container = document.getElementById('graph-container');
     const rect = container.getBoundingClientRect();
-    const PW = 260, PH = panel.offsetHeight || 200;
+    const PW = panel.offsetWidth || 440, PH = panel.offsetHeight || 200;
     let left = event.clientX - rect.left + 14;
     let top  = event.clientY - rect.top  - PH / 2;
     if (left + PW + 8 > container.clientWidth) left = event.clientX - rect.left - PW - 14;
@@ -1834,6 +2400,7 @@ export function showDetailPanel(type, id, event) {
 export function enterDeepFocusMode() {
   if (!focusDistances || !simulation) return;
   _deepFocusActive = true;
+  _syncGraphOptionsBtn();
   document.getElementById('graph-detail-panel').style.display = 'none';
   document.getElementById('deep-focus-exit').style.display = '';
   const focusedNodes = simulation.nodes().filter(n => focusDistances[n.id] !== undefined);
@@ -1889,7 +2456,7 @@ export function exitDeepFocusMode() {
 // ---- Resizable detail panel ----
 (function () {
   const panel = document.getElementById('graph-detail-panel');
-  const MIN_W = 220, MIN_H = 220;
+  const MIN_W = 300, MIN_H = 380;
   const maxW = () => window.innerWidth;
   const maxH = () => window.innerHeight;
   let _dir = null, _sx, _sy, _sw, _sh, _pl, _pt;
@@ -1900,6 +2467,7 @@ export function exitDeepFocusMode() {
       _dir = handle.dataset.dir;
       const r = panel.getBoundingClientRect();
       const cr = document.getElementById('graph-container').getBoundingClientRect();
+      if (!panel.style.height) panel.style.height = r.height + 'px';
       _sx = e.clientX; _sy = e.clientY;
       _sw = r.width;   _sh = r.height;
       _pl = r.left - cr.left;
@@ -1914,12 +2482,15 @@ export function exitDeepFocusMode() {
     const container = document.getElementById('graph-container');
     const cw = container.clientWidth, ch = container.clientHeight;
     const dx = e.clientX - _sx, dy = e.clientY - _sy;
+    const isEdge = panel.classList.contains('panel-edge');
+    const minH = isEdge ? 150 : MIN_H;
+    const capH = isEdge ? Math.min(maxH(), 320) : maxH();
     if (_dir === 'r' || _dir === 'br') {
       const newW = Math.max(MIN_W, Math.min(_sw + dx, maxW(), cw - _pl));
       panel.style.width = newW + 'px';
     }
     if (_dir === 'b' || _dir === 'br') {
-      const newH = Math.max(MIN_H, Math.min(_sh + dy, maxH(), ch - _pt));
+      const newH = Math.max(minH, Math.min(_sh + dy, capH, ch - _pt));
       panel.style.height = newH + 'px';
     }
     if (_dir === 'l' || _dir === 'tl' || _dir === 'bl') {
@@ -1928,7 +2499,7 @@ export function exitDeepFocusMode() {
       panel.style.left  = (_pl + _sw - newW) + 'px';
     }
     if (_dir === 't' || _dir === 'tl' || _dir === 'tr') {
-      const newH = Math.max(MIN_H, Math.min(_sh - dy, maxH(), _pt + _sh));
+      const newH = Math.max(minH, Math.min(_sh - dy, capH, _pt + _sh));
       panel.style.height = newH + 'px';
       panel.style.top    = (_pt + _sh - newH) + 'px';
     }
@@ -1937,7 +2508,7 @@ export function exitDeepFocusMode() {
       panel.style.width = newW + 'px';
     }
     if (_dir === 'bl') {
-      const newH = Math.max(MIN_H, Math.min(_sh + dy, maxH(), ch - _pt));
+      const newH = Math.max(minH, Math.min(_sh + dy, capH, ch - _pt));
       panel.style.height = newH + 'px';
     }
   });
@@ -1945,18 +2516,25 @@ export function exitDeepFocusMode() {
   document.addEventListener('mouseup', () => { _dir = null; });
 })();
 
-// 'A' key toggles attach mode
+// Hold 'A' to be in attach mode
+let _attachHeld = false;
 document.addEventListener('keydown', e => {
   if (e.key !== 'a' && e.key !== 'A') return;
+  if (e.repeat) return;
   const tag = document.activeElement?.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
-  if (attachMode) { toggleAttachMode(); return; }
+  if (attachMode) return;
   if (focusDistances !== null) return;
-  if (isolatedNodes !== null) return;
   if (document.getElementById('modal-overlay')?.classList.contains('open')) return;
   if (document.getElementById('attach-result')?.classList.contains('visible')) return;
   if (document.getElementById('node-result')?.classList.contains('visible')) return;
-  toggleAttachMode();
+  toggleAttachMode(true); _attachHeld = true;
+});
+document.addEventListener('keyup', e => {
+  if (e.key !== 'a' && e.key !== 'A') return;
+  if (!_attachHeld) return;
+  _attachHeld = false;
+  if (attachMode) toggleAttachMode();
 });
 
 // ---- Add Node (graph-coupled, lives here) ----
@@ -1985,6 +2563,10 @@ export async function openAddNode() {
     };
   }
   await loadData();
+  if (isolatedNodes !== null) {
+    isolatedNodes.add(newNode.id);
+    applyIsolationView();
+  }
   showNodeResult(newNode.id);
 }
 
@@ -1995,4 +2577,7 @@ Object.assign(window, {
   zoomIn, zoomOut,
   connectMultiSelected, isolateSelected, exitIsolation,
   deselectAll, enterDeepFocusMode, exitDeepFocusMode,
+  setLassoMode, openLassoFilter, closeLassoFilter,
+  openGraphOptions, closeGraphOptions, toggleFloatMode,
+  selectNodeById, selectEdgeById,
 });
