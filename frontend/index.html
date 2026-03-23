@@ -92,7 +92,6 @@
         <button type="button" class="btn btn-ghost btn-sm btn-clear" onclick="closeGraphOptions();clearGraph()">Clear Graph</button>
       </div>
     </div>
-    <button id="history-tab" onclick="toggleHistoryDrawer()">History</button>
     <div id="graph-trash">🗑</div>
     <div id="canvas-ctx-menu"><button id="canvas-ctx-add">+ Add Idea Here</button></div>
     <svg id="graph-svg"></svg>
@@ -114,9 +113,17 @@
         <button class="btn-close" onclick="deselectAll()">×</button>
       </div>
       <div id="detail-content"></div>
+      <div id="detail-questions-panel" style="display:none;">
+        <div id="detail-questions-list"></div>
+        <div id="detail-questions-input-row">
+          <input id="detail-questions-input" type="text" placeholder="Write a question…" autocomplete="off" spellcheck="false" />
+          <button id="detail-questions-add">+</button>
+        </div>
+      </div>
       <div class="detail-footer">
         <button id="btn-enter-focus" onclick="enterDeepFocusMode()" title="Enter Focus Mode">↗</button>
         <div id="palette-dropdown-container"></div>
+        <button class="btn-edit" id="btn-detail-questions">? Questions</button>
         <button class="btn-edit" id="detail-edit-btn">Edit</button>
         <button class="btn-delete" id="detail-delete-btn">Delete</button>
       </div>
@@ -125,8 +132,30 @@
       <span class="exit-label">Focus Mode</span>
       <button class="exit-btn" onclick="exitDeepFocusMode()">Exit</button>
     </div>
+    <div id="reflection-panel" style="display:none;">
+      <div class="detail-resize-r"  data-dir="r"></div>
+      <div class="detail-resize-b"  data-dir="b"></div>
+      <div class="detail-resize-br" data-dir="br"></div>
+      <div class="detail-resize-l"  data-dir="l"></div>
+      <div class="detail-resize-t"  data-dir="t"></div>
+      <div class="detail-resize-tl" data-dir="tl"></div>
+      <div class="detail-resize-tr" data-dir="tr"></div>
+      <div class="detail-resize-bl" data-dir="bl"></div>
+      <div class="reflection-header">
+        <span id="reflection-progress"></span>
+        <button class="btn-close" id="reflection-close">×</button>
+      </div>
+      <div id="reflection-content"></div>
+      <div class="reflection-footer">
+        <button id="reflection-next" class="btn btn-primary btn-sm">Next →</button>
+      </div>
+    </div>
   </div>
 </section>
+
+<button id="history-tab" onclick="toggleHistoryDrawer()">History</button>
+<button id="questions-tab" onclick="toggleQuestionsDrawer()"><span>Questions</span></button>
+<button id="reflection-tab" style="display:none;"><span>Reflect</span></button>
 
 <div id="table-scroll-wrap" style="display:none;">
 <div id="table-sections">
@@ -196,14 +225,37 @@
   </div>
 </div>
 
+<div id="info-overlay" class="overlay">
+  <div id="info-box" class="glass-box">
+    <p id="info-message"></p>
+    <div class="modal-footer">
+      <button class="btn-primary" id="info-ok">Got it!</button>
+    </div>
+  </div>
+</div>
+
+<div id="tour-callout" style="display:none;">
+  <p id="tour-callout-text"></p>
+  <div class="tour-callout-footer">
+    <button id="tour-callout-btn" class="btn btn-ghost btn-sm">Next →</button>
+  </div>
+</div>
+
 <div id="confirm-overlay" class="overlay">
   <div id="confirm-box" class="glass-box">
     <p id="confirm-message"></p>
     <div class="modal-footer">
-      <button class="btn-secondary" onclick="closeConfirm()">Cancel</button>
+      <button class="btn-secondary" id="confirm-cancel">Cancel</button>
+      <button id="confirm-alt" style="display:none;">Alt</button>
       <button class="btn-danger" id="confirm-ok">Delete</button>
     </div>
   </div>
+</div>
+
+<div id="idea-table-overlay" onclick="toggleIdeaTableDrawer()"></div>
+<div id="idea-table-drawer">
+  <button class="idea-table-close" onclick="toggleIdeaTableDrawer()">×</button>
+  <div id="idea-table-body"></div>
 </div>
 
 <div id="history-overlay" onclick="toggleHistoryDrawer()"></div>
@@ -215,13 +267,80 @@
   <ul id="history-list"></ul>
 </div>
 
+<div id="questions-overlay" onclick="toggleQuestionsDrawer()"></div>
+<div id="questions-drawer">
+  <div class="questions-drawer-header">
+    <h3>Questions</h3>
+    <button class="questions-close" onclick="toggleQuestionsDrawer()">×</button>
+  </div>
+  <ul id="questions-list"></ul>
+  <div class="questions-drawer-footer">
+    <button id="btn-questions-continue" class="btn btn-ghost">Continue →</button>
+  </div>
+</div>
+
+<div id="research-screen" style="display:none;">
+  <div id="research-panel-overlay"></div>
+  <div id="research-left-strip">
+    <button id="research-tab-history" onclick="toggleHistoryDrawer()">History</button>
+    <button id="research-tab-ideas" onclick="toggleIdeaTableDrawer()">Idea Table</button>
+  </div>
+  <div id="research-right-strip">
+    <button id="research-tab-notes"><span>Notes</span></button>
+  </div>
+  <div id="research-box">
+    <h1 class="landing-title" id="research-subject-title"></h1>
+    <p class="landing-sub">Click on a question to explore the answer.</p>
+    <ul id="research-questions-list"></ul>
+    <div id="research-footer">
+      <button id="btn-research-back" class="btn-landing-ghost">← Back to Idea Map</button>
+    </div>
+  </div>
+</div>
+
+<div id="research-answer-panel">
+  <div class="rap-header">
+    <div class="rap-question-text"></div>
+    <div class="rap-header-actions">
+      <button class="rap-regenerate" id="rap-regenerate-btn">↺ Regenerate</button>
+      <button class="rap-close" id="rap-close-btn">×</button>
+    </div>
+  </div>
+  <div class="rap-body"></div>
+  <div class="rap-notes">
+    <div class="rap-notes-label">My Notes</div>
+    <textarea class="rap-notes-input" id="rap-notes-input" placeholder="Write down your key takeaways…" spellcheck="false"></textarea>
+    <div class="rap-notes-hint">✎ Paraphrase in your own words for optimal learning!</div>
+    <div class="rap-notes-actions">
+      <button class="rap-notes-save" id="rap-notes-save">Save</button>
+      <button class="rap-notes-clear" id="rap-notes-clear">Clear</button>
+    </div>
+  </div>
+</div>
+
+<div id="research-notes-overlay"></div>
+
+<div id="research-notes-panel">
+  <div class="rnp-header">
+    <div class="rnp-title">My Notes</div>
+    <button class="rnp-close" id="rnp-close-btn">×</button>
+  </div>
+  <ul id="rnp-notes-list"></ul>
+  <div class="rnp-footer">
+    <div id="research-continue-wrap">
+      <button id="btn-research-continue" class="btn btn-ghost">Continue →</button>
+    </div>
+  </div>
+</div>
+
 <div id="questionnaire-screen" style="display:none;">
   <div id="questionnaire-box">
-    <h1 class="landing-title" id="questionnaire-subject-title"></h1>
+    <h1 class="landing-title">Learning Accelerator</h1>
+    <p class="questionnaire-subject-label" id="questionnaire-subject-title"></p>
     <p class="landing-sub">Tell us a bit about where you're starting from.</p>
     <div class="questionnaire-fields">
       <div class="q-field">
-        <label class="q-label">What is your goal in understanding the subject?</label>
+        <label class="q-label">What is your goal in understanding the subject? (Optional)</label>
         <textarea id="q-goal" class="q-textarea" rows="3" placeholder="e.g. Pass my exam, build a project, satisfy curiosity…" autocomplete="off" spellcheck="false"></textarea>
       </div>
       <div class="q-field">
@@ -236,10 +355,17 @@
         <div class="q-slider-labels"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span></div>
       </div>
       <div class="q-field">
-        <label class="q-label">Outline what you know:</label>
+        <label class="q-label">
+          Outline what you know:
+          <button type="button" id="btn-upload-pdf" class="q-pdf-btn">Upload PDF</button>
+          <input type="file" id="q-pdf-input" accept=".pdf" style="display:none">
+        </label>
         <textarea id="q-knowledge" class="q-textarea" rows="4" placeholder="Jot down anything you already understand about this subject…" autocomplete="off" spellcheck="false"></textarea>
+        <p id="q-pdf-status" class="q-pdf-status"></p>
       </div>
     </div>
+    <p id="q-loading-msg">We will use AI to generate a starting idea map.</p>
+    <div id="q-toast"></div>
     <button id="btn-questionnaire-continue" class="btn-landing-primary" disabled>Start Learning</button>
     <button id="btn-questionnaire-skip" class="btn-landing-ghost">Skip</button>
   </div>
@@ -263,6 +389,17 @@
       <input id="subject-input" type="text" placeholder="e.g. Linear Algebra" autocomplete="off" spellcheck="false" />
       <button id="btn-create-subject" class="btn-landing-primary">New Subject</button>
       <p id="landing-error" class="landing-error"></p>
+    </div>
+  </div>
+</div>
+
+<div id="citation-modal" style="display:none;">
+  <div id="citation-modal-box">
+    <div id="citation-modal-title"></div>
+    <div id="citation-modal-url"></div>
+    <div class="citation-modal-footer">
+      <button id="citation-modal-cancel">Cancel</button>
+      <button id="citation-modal-open">Open Source ↗</button>
     </div>
   </div>
 </div>

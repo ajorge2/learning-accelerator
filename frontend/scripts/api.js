@@ -5,6 +5,37 @@ import { renderGraph } from './graph.js';
 export const API = 'http://localhost:8000';
 export let nodes = {};
 export let edges = {};
+export let currentState = null;
+export const undoStack = [];
+
+export function setAppState(state) {
+  if (state !== 'FirstOutline') undoStack.length = 0;
+  currentState = state;
+  const secondOutline  = state === 'SecondOutline';
+  const firstOutline   = state === 'FirstOutline';
+
+  // Questions feature — hidden in SecondOutline
+  const questionsTab = document.getElementById('questions-tab');
+  const detailQBtn   = document.getElementById('btn-detail-questions');
+  const detailQPanel = document.getElementById('detail-questions-panel');
+  if (questionsTab) questionsTab.style.display = secondOutline ? 'none' : '';
+  if (detailQBtn)   detailQBtn.style.display   = secondOutline ? 'none' : '';
+  if (detailQPanel && secondOutline) detailQPanel.style.display = 'none';
+
+  // Reflection tab — only in SecondOutline
+  const reflectionTab = document.getElementById('reflection-tab');
+  if (reflectionTab) reflectionTab.style.display = secondOutline ? '' : 'none';
+
+  // Add node/edge UI — hidden in FirstOutline
+  const hide = v => v ? 'none' : '';
+  document.getElementById('btn-attach')?.style.setProperty('display', hide(firstOutline));
+  document.getElementById('btn-add-idea')?.style.setProperty('display', hide(firstOutline));
+  document.getElementById('canvas-ctx-menu')?.style.setProperty('display', hide(firstOutline));
+  const connectBtn = document.querySelector('#connect-pill .btn-connect');
+  if (connectBtn) connectBtn.style.display = hide(firstOutline);
+  const emptyAddBtn = document.querySelector('#graph-empty button');
+  if (emptyAddBtn) emptyAddBtn.style.display = hide(firstOutline);
+}
 
 // ---- Algolia ----
 
@@ -52,7 +83,7 @@ export async function syncAlgolia() {
     })),
   ];
   try {
-    await _algoliaWriteIdx.replaceAllObjects(records, { safe: true });
+    await _algoliaWriteIdx.replaceAllObjects(records);
   } catch (err) {
     console.error('Algolia sync failed:', err);
   }

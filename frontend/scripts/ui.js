@@ -1,15 +1,63 @@
-import { nodes, edges, loadData, apiRequest, confirmDelete, API } from './api.js';
+import { nodes, edges, loadData, apiRequest, confirmDelete, API, currentState, undoStack } from './api.js';
 import { attachMode, toggleAttachMode } from './graph.js';
 import { addHistory } from './history.js';
 
+// ---- Tour callout ----
+
+export function showTour(steps) {
+  const callout = document.getElementById('tour-callout');
+  const textEl  = document.getElementById('tour-callout-text');
+  const btn     = document.getElementById('tour-callout-btn');
+  let idx = 0;
+
+  function show() {
+    if (idx >= steps.length) {
+      callout.style.display = 'none';
+      return;
+    }
+    const step = steps[idx];
+    if (step.beforeShow) step.beforeShow();
+
+    textEl.textContent = step.text;
+    btn.textContent    = idx < steps.length - 1 ? 'Next →' : 'Got it!';
+
+    // Reset all position props then apply step's
+    Object.assign(callout.style, { top: '', left: '', right: '', bottom: '', transform: '', display: 'block' });
+    Object.assign(callout.style, step.pos);
+  }
+
+  btn.onclick = () => { idx++; show(); };
+  show();
+}
+
+// ---- Info dialog ----
+
+export function showInfo(message) {
+  document.getElementById('info-message').textContent = message;
+  const okBtn = document.getElementById('info-ok');
+  okBtn.onclick = () => document.getElementById('info-overlay').classList.remove('open');
+  document.getElementById('info-overlay').classList.add('open');
+}
+
 // ---- Confirm dialog ----
 
-export function showConfirm(message, onConfirm, { okLabel = 'Delete', okClass = 'btn-danger' } = {}) {
+export function showConfirm(message, onConfirm, { okLabel = 'Delete', okClass = 'btn-danger', onCancel = null, altLabel = null, altClass = 'btn-secondary', onAlt = null } = {}) {
   document.getElementById('confirm-message').textContent = message;
-  const okBtn = document.getElementById('confirm-ok');
+  const okBtn     = document.getElementById('confirm-ok');
+  const cancelBtn = document.getElementById('confirm-cancel');
+  const altBtn    = document.getElementById('confirm-alt');
   okBtn.textContent = okLabel;
-  okBtn.className = okClass;
-  okBtn.onclick = () => { closeConfirm(); onConfirm(); };
+  okBtn.className   = okClass;
+  okBtn.onclick     = () => { closeConfirm(); onConfirm(); };
+  cancelBtn.onclick = () => { closeConfirm(); onCancel?.(); };
+  if (altLabel && onAlt) {
+    altBtn.textContent = altLabel;
+    altBtn.className   = altClass;
+    altBtn.onclick     = () => { closeConfirm(); onAlt(); };
+    altBtn.style.display = '';
+  } else {
+    altBtn.style.display = 'none';
+  }
   document.getElementById('confirm-overlay').classList.add('open');
 }
 
@@ -191,6 +239,10 @@ export function openEditNode(id) {
 export function deleteNode(id) {
   const title = nodes[id]?.title ?? id;
   showConfirm(`Delete "${title}"? Its connections will also be deleted.`, async () => {
+    if (currentState === 'FirstOutline') {
+      const nodeEdges = Object.values(edges).filter(e => e.node_a_id === id || e.node_b_id === id);
+      undoStack.push({ type: 'delete-node', node: { ...nodes[id] }, edges: nodeEdges.map(e => ({ ...e })) });
+    }
     await fetch(`${API}/nodes/${id}`, { method: 'DELETE' });
     addHistory(`Deleted "${title}"`, '✕');
     loadData();
@@ -351,6 +403,9 @@ export function deleteEdge(id) {
   const e = edges[id];
   const label = e ? `"${nodes[e.node_a_id]?.title}"–"${nodes[e.node_b_id]?.title}"` : 'connection';
   showConfirm(`Delete connection?`, async () => {
+    if (currentState === 'FirstOutline' && e) {
+      undoStack.push({ type: 'delete-edge', edge: { ...e } });
+    }
     await fetch(`${API}/edges/${id}`, { method: 'DELETE' });
     addHistory(`Deleted connection ${label}`, '✕');
     loadData();

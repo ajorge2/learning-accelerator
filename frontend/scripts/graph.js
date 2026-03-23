@@ -1,5 +1,5 @@
 import * as d3 from 'd3';
-import { nodes, edges, loadData, apiRequest, API } from './api.js';
+import { nodes, edges, loadData, apiRequest, API, currentState, undoStack } from './api.js';
 import { showConfirm, openEditNode, deleteNode, openEdgeModal, deleteEdge } from './ui.js';
 import { addHistory } from './history.js';
 
@@ -9,48 +9,68 @@ const HOVER_VISUAL_R = 17;  // screen-pixel radius a hovered node grows to
 // Node palette (HSL): fill/hover/selected/stroke derived automatically per hue.
 const NODE_PALETTE = [
   // Default
-  { name: 'Pearl',       h: 40,  s: 18, l: 90 },  // index 0 — default for new nodes
+  { name: 'Pearl',       h: 40,  s: 18,  l: 90 },  // index 0 — default for new nodes
   // Blues & teals
-  { name: 'Blue',        h: 215, s: 48, l: 40 },
-  { name: 'Sky',         h: 198, s: 52, l: 40 },
-  { name: 'Seafoam',     h: 172, s: 36, l: 38 },
-  { name: 'Teal',        h: 184, s: 42, l: 28 },
+  { name: 'Blue',        h: 215, s: 48,  l: 40 },
+  { name: 'Sky',         h: 198, s: 52,  l: 40 },
+  { name: 'Electric',    h: 220, s: 100, l: 52 },
+  { name: 'Neon Cyan',   h: 188, s: 100, l: 46 },
+  { name: 'Ice',         h: 196, s: 72,  l: 72 },
+  { name: 'Glacier',     h: 200, s: 60,  l: 58 },
+  { name: 'Seafoam',     h: 172, s: 36,  l: 38 },
+  { name: 'Teal',        h: 184, s: 42,  l: 28 },
+  { name: 'Pulsar',      h: 185, s: 65,  l: 36 },
+  { name: 'Abyss',       h: 220, s: 45,  l: 18 },
   // Greens
-  { name: 'Sage',        h: 145, s: 32, l: 38 },
-  { name: 'Forest',      h: 145, s: 38, l: 22 },
+  { name: 'Sage',        h: 145, s: 32,  l: 38 },
+  { name: 'Forest',      h: 145, s: 38,  l: 22 },
+  { name: 'Neon Green',  h: 140, s: 100, l: 42 },
+  { name: 'Acid',        h: 80,  s: 100, l: 42 },
+  { name: 'Biolum',      h: 165, s: 80,  l: 38 },
+  { name: 'Aurora',      h: 160, s: 65,  l: 40 },
+  { name: 'Moss',        h: 120, s: 28,  l: 30 },
   // Purples & pinks
-  { name: 'Lavender',    h: 262, s: 30, l: 48 },
-  { name: 'Plum',        h: 292, s: 24, l: 40 },
-  { name: 'Violet',      h: 270, s: 40, l: 28 },
-  { name: 'Rose',        h: 338, s: 36, l: 46 },
-  { name: 'Crimson',     h: 350, s: 45, l: 28 },
+  { name: 'Lavender',    h: 262, s: 30,  l: 48 },
+  { name: 'Vaporwave',   h: 280, s: 50,  l: 58 },
+  { name: 'Plum',        h: 292, s: 24,  l: 40 },
+  { name: 'Violet',      h: 270, s: 40,  l: 28 },
+  { name: 'Synthwave',   h: 285, s: 65,  l: 42 },
+  { name: 'Nebula',      h: 248, s: 48,  l: 36 },
+  { name: 'Cosmos',      h: 230, s: 35,  l: 20 },
+  { name: 'Magenta',     h: 300, s: 70,  l: 46 },
+  { name: 'Neon Pink',   h: 320, s: 100, l: 52 },
+  { name: 'Hot Pink',    h: 340, s: 80,  l: 52 },
+  { name: 'Rose',        h: 338, s: 36,  l: 46 },
+  { name: 'Crimson',     h: 350, s: 45,  l: 28 },
+  { name: 'Infrared',    h: 4,   s: 72,  l: 38 },
   // Warm tones
-  { name: 'Terra',       h: 14,  s: 40, l: 40 },
-  { name: 'Rust',        h: 14,  s: 50, l: 26 },
-  { name: 'Sand',        h: 34,  s: 42, l: 42 },
-  { name: 'Gold',        h: 46,  s: 48, l: 42 },
-  { name: 'Umber',       h: 28,  s: 32, l: 24 },
+  { name: 'Terra',       h: 14,  s: 40,  l: 40 },
+  { name: 'Rust',        h: 14,  s: 50,  l: 26 },
+  { name: 'Ember',       h: 8,   s: 65,  l: 36 },
+  { name: 'Molten',      h: 12,  s: 80,  l: 42 },
+  { name: 'Copper',      h: 20,  s: 55,  l: 44 },
+  { name: 'Nova',        h: 25,  s: 75,  l: 45 },
+  { name: 'Sand',        h: 34,  s: 42,  l: 42 },
+  { name: 'Umber',       h: 28,  s: 32,  l: 24 },
+  { name: 'Amber',       h: 38,  s: 90,  l: 48 },
+  { name: 'Gold',        h: 46,  s: 48,  l: 42 },
+  { name: 'Solar',       h: 45,  s: 85,  l: 52 },
   // Neutrals
-  { name: 'Slate',       h: 215, s: 16, l: 36 },
-  { name: 'Steel',       h: 215, s: 10, l: 28 },
-  { name: 'Charcoal',    h: 220, s:  8, l: 20 },
-  { name: 'Stone',       h: 30,  s:  8, l: 32 },
-  { name: 'Ash',         h: 30,  s:  4, l: 24 },
+  { name: 'Chrome',      h: 205, s: 15,  l: 52 },
+  { name: 'Mist',        h: 210, s: 20,  l: 65 },
+  { name: 'Slate',       h: 215, s: 16,  l: 36 },
+  { name: 'Steel',       h: 215, s: 10,  l: 28 },
+  { name: 'Graphite',    h: 220, s: 6,   l: 30 },
+  { name: 'Charcoal',    h: 220, s: 8,   l: 20 },
+  { name: 'Stone',       h: 30,  s: 8,   l: 32 },
+  { name: 'Ash',         h: 30,  s: 4,   l: 24 },
 ];
 
-// Edge palette: explicit stroke colors. Index 0 = default white.
-const EDGE_PALETTE = [
-  { name: 'Default', color: 'rgba(255,255,255,0.78)' },
-  { name: 'Blue',    color: 'rgba(96,165,250,0.9)'   },
-  { name: 'Teal',    color: 'rgba(45,212,191,0.9)'   },
-  { name: 'Green',   color: 'rgba(74,222,128,0.9)'   },
-  { name: 'Lime',    color: 'rgba(163,230,53,0.9)'   },
-  { name: 'Amber',   color: 'rgba(251,191,36,0.9)'   },
-  { name: 'Orange',  color: 'rgba(251,146,60,0.9)'   },
-  { name: 'Rose',    color: 'rgba(251,113,133,0.9)'  },
-  { name: 'Violet',  color: 'rgba(167,139,250,0.9)'  },
-  { name: 'Cyan',    color: 'rgba(34,211,238,0.9)'   },
-];
+// Edge palette: derived from NODE_PALETTE, brightened for visibility as thin lines.
+const EDGE_PALETTE = NODE_PALETTE.map(({ name, h, s, l }) => ({
+  name,
+  color: `hsla(${h},${Math.min(100, s + 15)}%,${Math.min(95, l + 22)}%,0.9)`,
+}));
 
 function nodeColorVars(colorIdx) {
   const { h, s, l } = NODE_PALETTE[colorIdx ?? 0];
@@ -77,12 +97,17 @@ let gZoom         = null;
 let zoomBehavior  = null;
 let graphW = 800, graphH = 600;
 let selectedId    = null;
+let _selectedBranchKey = null;
+const _branchColors = new Map(); // branchKey → colorIdx (independent of individual edge colors)
+let _yEdgeIndex  = new Map(); // edgeId → branchKey — updated each tick, read by edge hover handlers
+let _yBranchLabel = new Map(); // branchKey → isFirst edgeId (the one whose label sits on the stem)
 let selectedType  = null;  // 'node' | 'edge'
 let hoveredNodeId = null;
 let focusDistances = null;
 let savedZoom = null;
 let isolatedNodes = null;
 let _deepFocusActive = false;
+let _returnToQuestionsDrawer = false;
 let savedZoomIsolation = null;
 let _pendingNodePos = null;
 let multiSelected = new Set();
@@ -92,6 +117,7 @@ export let floatMode = true;
 const _edgeBends = new Map(); // edge_id -> { offset, vel }  — only for parallel pairs
 let _bendSettled = true;
 let _bendAnimId  = null;
+let _palettePointerdown = null;
 const SIM_STORAGE_KEY = 'nodeSimData';
 let nodeSimData = (() => {
   try { return JSON.parse(localStorage.getItem(SIM_STORAGE_KEY)) || {}; } catch { return {}; }
@@ -363,7 +389,7 @@ export function initGraph() {
   defs.append('marker')
     .attr('id', 'arrow')
     .attr('viewBox', '0 -3.5 10 7')
-    .attr('refX', 10)
+    .attr('refX', 0)
     .attr('refY', 0)
     .attr('markerUnits', 'userSpaceOnUse')
     .attr('markerWidth', 12)
@@ -407,6 +433,27 @@ export function initGraph() {
   hm.append('feMergeNode').attr('in', 'halo-fade');
   hm.append('feMergeNode').attr('in', 'textured');
 
+  // Lantern glow filter for selected edges — bright core + layered bloom
+  const edgeGlow = defs.append('filter')
+    .attr('id', 'edge-glow')
+    .attr('x', '-300%').attr('y', '-300%')
+    .attr('width', '700%').attr('height', '700%');
+  edgeGlow.append('feGaussianBlur')
+    .attr('in', 'SourceGraphic').attr('stdDeviation', '2.5').attr('result', 'blur-inner');
+  edgeGlow.append('feGaussianBlur')
+    .attr('in', 'SourceGraphic').attr('stdDeviation', '7').attr('result', 'blur-mid');
+  edgeGlow.append('feGaussianBlur')
+    .attr('in', 'SourceGraphic').attr('stdDeviation', '18').attr('result', 'blur-outer');
+  edgeGlow.append('feComponentTransfer').attr('in', 'blur-outer').attr('result', 'bloom')
+    .append('feFuncA').attr('type', 'linear').attr('slope', '0.35');
+  edgeGlow.append('feComponentTransfer').attr('in', 'blur-mid').attr('result', 'mid-glow')
+    .append('feFuncA').attr('type', 'linear').attr('slope', '0.65');
+  const egm = edgeGlow.append('feMerge');
+  egm.append('feMergeNode').attr('in', 'bloom');
+  egm.append('feMergeNode').attr('in', 'mid-glow');
+  egm.append('feMergeNode').attr('in', 'blur-inner');
+  egm.append('feMergeNode').attr('in', 'SourceGraphic');
+
   const grain = defs.append('filter')
     .attr('id', 'paper-grain')
     .attr('x', '0%').attr('y', '0%')
@@ -436,6 +483,7 @@ export function initGraph() {
 
   gZoom = svgRoot.append('g').attr('class', 'zoom-layer');
   gZoom.append('g').attr('class', 'edges-layer');
+  gZoom.append('g').attr('class', 'branch-orbs-layer');
   gZoom.append('g').attr('class', 'nodes-layer');
   gZoom.append('g').attr('class', 'labels-layer');
 
@@ -560,6 +608,7 @@ export function initGraph() {
 
   svgRoot.on('dblclick', e => {
     if (e.target !== svgRoot.node() && e.target.id !== 'grid-bg') return;
+    if (currentState === 'FirstOutline') return;
     clearTimeout(_clearSourceTimer);
     const tr = d3.zoomTransform(svgRoot.node());
     const rect = svgRoot.node().getBoundingClientRect();
@@ -828,13 +877,26 @@ export function renderGraph() {
     .classed('selected', d => d.id === selectedId && selectedType === 'edge')
     .on('click', (e, d) => { e.stopPropagation(); selectEdge(d.id, e); })
     .on('mouseenter', (e, d) => {
+      const bKey = _yEdgeIndex.get(d.id);
+      const labelId = bKey ? (_yBranchLabel.get(bKey) ?? d.id) : d.id;
       gZoom.select('.labels-layer').selectAll('.edge-label')
-        .filter(l => l.id === d.id).style('opacity', 1);
+        .filter(l => l.id === labelId).style('opacity', 1);
+      if (bKey) {
+        gZoom.select('.branch-orbs-layer').selectAll('.g-branch-orb')
+          .filter(v => v.key === bKey).classed('spoke-hovered', true);
+      }
     })
     .on('mouseleave', (e, d) => {
-      if (!(d.id === selectedId && selectedType === 'edge')) {
+      const bKey = _yEdgeIndex.get(d.id);
+      const labelId = bKey ? (_yBranchLabel.get(bKey) ?? d.id) : d.id;
+      const labelIsSelected = labelId === selectedId && selectedType === 'edge';
+      if (!labelIsSelected) {
         gZoom.select('.labels-layer').selectAll('.edge-label')
-          .filter(l => l.id === d.id).style('opacity', 0);
+          .filter(l => l.id === labelId).style('opacity', 0);
+      }
+      if (bKey) {
+        gZoom.select('.branch-orbs-layer').selectAll('.g-branch-orb')
+          .filter(v => v.key === bKey).classed('spoke-hovered', false);
       }
     });
 
@@ -1081,6 +1143,133 @@ function ticked() {
     _pairGroups.forEach(ids => ids.sort());
   }
 
+  // Build Y-groups: edges with identical label that share one endpoint.
+  // Rendered as a branching Y instead of N separate lines.
+  const _yEdge = new Map(); // edgeId → { hubNode, spokeNode, stemX, stemY, isFirst, key, edgeIds, body }
+  if (focusDistances === null) {
+    const _eList = [];
+    gZoom.select('.edges-layer').selectAll('.g-edge').each(function(d) {
+      const sObj = typeof d.source === 'object' ? d.source : null;
+      const tObj = typeof d.target === 'object' ? d.target : null;
+      if (sObj && tObj && d.body?.trim()) {
+        _eList.push({ id: d.id, body: d.body.trim(), sObj, tObj, bidir: d.bidirectional, src_id: d.source_id });
+      }
+    });
+    const _byHubBody = new Map();
+    for (const e of _eList) {
+      // For bidirectional edges either endpoint can be the hub.
+      // For directed edges only the actual source can be the hub.
+      const candidates = e.bidir
+        ? [[e.sObj, e.tObj], [e.tObj, e.sObj]]
+        : [[e.src_id === e.sObj.id ? e.sObj : e.tObj,
+            e.src_id === e.sObj.id ? e.tObj : e.sObj]];
+      for (const [hubNode, spokeNode] of candidates) {
+        const k = `${hubNode.id}||${e.body}`;
+        if (!_byHubBody.has(k)) _byHubBody.set(k, { hubNode, members: [], body: e.body });
+        _byHubBody.get(k).members.push({ id: e.id, spokeNode });
+      }
+    }
+    const _claimed = new Set();
+    [..._byHubBody.values()]
+      .filter(g => g.members.length >= 2)
+      .sort((a, b) => b.members.length - a.members.length)
+      .forEach(({ hubNode, members, body: groupBody }) => {
+        const free = members.filter(m => !_claimed.has(m.id));
+        if (free.length < 2) return;
+        const hx = hubNode.x ?? 0, hy = hubNode.y ?? 0;
+        const cx = free.reduce((s, m) => s + (m.spokeNode.x ?? 0), 0) / free.length;
+        const cy = free.reduce((s, m) => s + (m.spokeNode.y ?? 0), 0) / free.length;
+        const stemX = hx + (cx - hx) * 0.5;
+        const stemY = hy + (cy - hy) * 0.5;
+        const groupKey = `${hubNode.id}||${groupBody}`;
+        const edgeIds  = free.map(m => m.id);
+        free.forEach((m, i) => {
+          _claimed.add(m.id);
+          _yEdge.set(m.id, { hubNode, spokeNode: m.spokeNode, stemX, stemY, isFirst: i === 0, key: groupKey, edgeIds, body: groupBody });
+        });
+      });
+  }
+
+  // Sync module-level indices for edge hover handlers
+  _yEdgeIndex.clear();
+  _yBranchLabel.clear();
+  _yEdge.forEach((v, eid) => {
+    _yEdgeIndex.set(eid, v.key);
+    if (v.isFirst) _yBranchLabel.set(v.key, eid);
+  });
+
+  // Render orbs at Y-group stem intersections
+  const _orbDataArr = [..._yEdge.values()].filter(v => v.isFirst);
+  gZoom.select('.branch-orbs-layer')
+    .selectAll('.g-branch-orb')
+    .data(_orbDataArr, v => v.key)
+    .join(
+      enter => {
+        const g = enter.append('g').attr('class', 'g-branch-orb');
+        g.append('line').attr('class', 'branch-stem-vis').attr('x2', 0).attr('y2', 0);
+        g.append('line').attr('class', 'branch-stem-hit').attr('x2', 0).attr('y2', 0);
+        g.append('circle').attr('r', 3.5).attr('class', 'branch-orb-circle');
+        return g;
+      },
+      update => update,
+      exit => exit.remove()
+    )
+    // Re-bind handlers on the merged selection every tick so datum is always fresh
+    .on('click', (ev, v) => {
+      ev.stopPropagation();
+      _selectedBranchKey = v.key;
+      selectedId   = null;
+      selectedType = null;
+      // Apply branch-selected immediately — don't wait for the next sim tick
+      gZoom.select('.branch-orbs-layer').selectAll('.g-branch-orb')
+        .classed('branch-selected', d => d.key === v.key);
+      refreshSelectionClasses();
+      showBranchPanel(v, ev);
+    })
+    .on('mouseenter', function(ev, v) {
+      d3.select(this).classed('hovered', true);
+      gZoom.select('.edges-layer').selectAll('.g-edge')
+        .filter(d => v.edgeIds.includes(d.id))
+        .classed('branch-hovered', true);
+      const labelId = _yBranchLabel.get(v.key);
+      if (labelId) {
+        gZoom.select('.labels-layer').selectAll('.edge-label')
+          .filter(l => l.id === labelId).style('opacity', 1);
+      }
+    })
+    .on('mouseleave', function(ev, v) {
+      d3.select(this).classed('hovered', false);
+      gZoom.select('.edges-layer').selectAll('.g-edge')
+        .classed('branch-hovered', false);
+      const labelId = _yBranchLabel.get(v.key);
+      if (labelId && !(labelId === selectedId && selectedType === 'edge')) {
+        gZoom.select('.labels-layer').selectAll('.edge-label')
+          .filter(l => l.id === labelId).style('opacity', 0);
+      }
+    })
+    .classed('branch-selected', v => v.key === _selectedBranchKey)
+    .attr('transform', v => `translate(${v.stemX},${v.stemY})`);
+
+  // Update stem endpoints + branch color each tick
+  gZoom.select('.branch-orbs-layer').selectAll('.g-branch-orb').each(function(d) {
+    // Initialize branch color on first render from edge; never re-read individual edge after that
+    if (!_branchColors.has(d.key)) {
+      _branchColors.set(d.key, nodeSimData[d.edgeIds[0]]?.colorIdx ?? 0);
+    }
+    const branchColorIdx = _branchColors.get(d.key);
+    const branchColor    = EDGE_PALETTE[branchColorIdx]?.color ?? EDGE_PALETTE[0].color;
+    // Hub-offset point (start of visible stem, avoids overdrawing the node shape)
+    const hx = d.hubNode.x ?? 0, hy = d.hubNode.y ?? 0;
+    const sDx = d.stemX - hx, sDy = d.stemY - hy, sDist = Math.sqrt(sDx*sDx + sDy*sDy) || 1;
+    const hx1 = hx + (sDx / sDist) * baseNodeR(d.hubNode.id) - d.stemX;
+    const hy1 = hy + (sDy / sDist) * baseNodeR(d.hubNode.id) - d.stemY;
+    const g = d3.select(this);
+    g.style('--branch-color', branchColor);
+    g.classed('has-selected-edge', selectedType === 'edge' && d.edgeIds.includes(selectedId));
+    g.select('.branch-stem-vis').attr('x1', hx1).attr('y1', hy1);
+    g.select('.branch-stem-hit').attr('x1', hx - d.stemX).attr('y1', hy - d.stemY);
+  });
+
   gZoom.select('.edges-layer').selectAll('.g-edge').each(function(d) {
     const isReversed = !d.bidirectional && d.source_id && d.source_id === d.node_b_id;
     const sNode = isReversed ? d.target : d.source;
@@ -1095,12 +1284,36 @@ function ticked() {
     const x2 = tx - ux * baseNodeR(tNode.id), y2 = ty - uy * baseNodeR(tNode.id);
 
     const arrow = d.bidirectional ? null : 'url(#arrow)';
-    let pathD, labelX, labelY;
+    // refX=0 means the arrow BASE sits at the path endpoint; tip extends forward 12 user-units.
+    // Pull edge-line back 6 units so its stroke endpoint sits at the arrow base (full ~8.5px
+    // wide there), which completely covers the 3px stroke — no blunt tip, no gap.
+    // The tip lands exactly at x2 (node boundary) at every zoom level.
+    const pb = d.bidirectional ? 0 : 12;
+    let pathD, lineD, labelX, labelY;
 
     if (focusDistances !== null) {
       pathD  = `M${x1},${y1} L${x2},${y2}`;
+      lineD  = `M${x1},${y1} L${x2 - ux*pb},${y2 - uy*pb}`;
       labelX = (x1 + x2) / 2;
       labelY = (y1 + y2) / 2 - 9;
+    } else if (_yEdge.has(d.id)) {
+      const { hubNode, spokeNode, stemX, stemY, isFirst } = _yEdge.get(d.id);
+      const hx = hubNode.x ?? 0, hy = hubNode.y ?? 0;
+      const spx = spokeNode.x ?? 0, spy = spokeNode.y ?? 0;
+      // Hub → stem (for label position reference only — stem is drawn by branch-stem-vis)
+      const sDx = stemX - hx, sDy = stemY - hy, sDist = Math.sqrt(sDx*sDx + sDy*sDy) || 1;
+      const hx1 = hx + (sDx / sDist) * baseNodeR(hubNode.id);
+      const hy1 = hy + (sDy / sDist) * baseNodeR(hubNode.id);
+      // Spoke only: orb → spoke node (individual edge color applies only here)
+      const bDx = spx - stemX, bDy = spy - stemY, bDist = Math.sqrt(bDx*bDx + bDy*bDy) || 1;
+      const bUx = bDx / bDist, bUy = bDy / bDist;
+      const spx2 = spx - bUx * baseNodeR(spokeNode.id);
+      const spy2 = spy - bUy * baseNodeR(spokeNode.id);
+      pathD  = `M${stemX},${stemY} L${spx2},${spy2}`;
+      lineD  = `M${stemX},${stemY} L${spx2 - bUx*pb},${spy2 - bUy*pb}`;
+      // Label sits on the shared stem, shown only for the first member of the group
+      labelX = isFirst ? (hx1 + stemX) / 2 : -9999;
+      labelY = isFirst ? (hy1 + stemY) / 2 - 9 : -9999;
     } else {
       const aId2    = (typeof d.source === 'object' ? d.source.id : null) ?? d.node_a_id ?? '';
       const bId2    = (typeof d.target === 'object' ? d.target.id : null) ?? d.node_b_id ?? '';
@@ -1117,6 +1330,7 @@ function ticked() {
       // Debug — remove once working
       if (Math.abs(offset) < 0.5) {
         pathD  = `M${x1},${y1} L${x2},${y2}`;
+        lineD  = `M${x1},${y1} L${x2 - ux*pb},${y2 - uy*pb}`;
         labelX = (x1 + x2) / 2;
         labelY = (y1 + y2) / 2 - 9;
       } else {
@@ -1131,7 +1345,10 @@ function ticked() {
         const py   =  caDx / caL;
         const cpX  = (x1 + x2) / 2 + px * offset;
         const cpY  = (y1 + y2) / 2 + py * offset;
+        const tdx = x2 - cpX, tdy = y2 - cpY, tl = Math.sqrt(tdx*tdx + tdy*tdy) || 1;
+        const tux = tdx / tl, tuy = tdy / tl;
         pathD  = `M${x1},${y1} Q${cpX},${cpY} ${x2},${y2}`;
+        lineD  = `M${x1},${y1} Q${cpX},${cpY} ${x2 - tux*pb},${y2 - tuy*pb}`;
         labelX = 0.25 * x1 + 0.5 * cpX + 0.25 * x2;
         labelY = 0.25 * y1 + 0.5 * cpY + 0.25 * y2 - 9;
       }
@@ -1143,7 +1360,7 @@ function ticked() {
     d3.select(this).style('--edge-color', edgeColor);
 
     d3.select(this).select('.edge-hit').attr('d', pathD);
-    d3.select(this).select('.edge-line').attr('d', pathD).attr('marker-end', arrow);
+    d3.select(this).select('.edge-line').attr('d', lineD).attr('marker-end', arrow);
     gZoom.select('.labels-layer').selectAll('.edge-label')
       .filter(l => l.id === d.id)
       .attr('x', labelX).attr('y', labelY);
@@ -1189,7 +1406,11 @@ document.addEventListener('mousemove', e => { _mouseClientX = e.clientX; _mouseC
 
 document.addEventListener('keydown', async (e) => {
   if (e.key !== 'n') return;
+  if (currentState === 'FirstOutline') return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+  if (document.getElementById('graph-detail-panel')?.style.display !== 'none') return;
+  if (document.getElementById('history-drawer')?.classList.contains('open')) return;
+  if (document.getElementById('questions-drawer')?.classList.contains('open')) return;
   e.preventDefault();
   if (_nodeResultStack.length >= 10) return;
   const svgEl = svgRoot.node();
@@ -1356,6 +1577,7 @@ export function enterAttachFrom(nodeId) {
 }
 
 export function toggleAttachMode(hideEscHint = false) {
+  if (currentState === 'FirstOutline') return;
   attachMode = !attachMode;
   document.getElementById('btn-attach').classList.toggle('active', attachMode);
   document.getElementById('graph-container').classList.toggle('attach-mode', attachMode);
@@ -1768,6 +1990,18 @@ function selectNode(id, event) {
   zoomToNode(id);
 }
 
+// Focus a node (highlight + zoom) without opening the detail panel — used by reflection
+export function focusNodeOnly(id) {
+  if (!focusDistances) savedZoom = d3.zoomTransform(svgRoot.node());
+  selectedId     = id;
+  selectedType   = 'node';
+  focusDistances = computeDistances(id);
+  document.getElementById('graph-detail-panel').style.display = 'none';
+  refreshSelectionClasses();
+  applyFocusView();
+  zoomToNode(id);
+}
+
 function selectEdge(id, event) {
   selectedId   = id;
   selectedType = 'edge';
@@ -1784,6 +2018,19 @@ export function selectNodeById(id) {
 export function selectEdgeById(id) {
   if (window.switchView) window.switchView('graph');
   selectEdge(id, null);
+}
+
+function _setupPaletteDismiss(detailsEl) {
+  const panel = document.getElementById('graph-detail-panel');
+  if (_palettePointerdown) panel.removeEventListener('pointerdown', _palettePointerdown);
+  _palettePointerdown = (ev) => {
+    if (!detailsEl.open) return;
+    if (!detailsEl.contains(ev.target)) {
+      detailsEl.removeAttribute('open');
+      document.getElementById('graph-container').classList.remove('color-picking');
+    }
+  };
+  panel.addEventListener('pointerdown', _palettePointerdown);
 }
 
 export function deselectAll() {
@@ -1807,7 +2054,17 @@ export function deselectAll() {
     svgRoot.transition().duration(1000).ease(d3.easeQuadInOut).call(zoomBehavior.transform, savedZoom);
     savedZoom = null;
   }
+  _selectedBranchKey = null;
+  gZoom?.select('.edges-layer')?.selectAll('.g-edge')?.classed('branch-active', false);
   document.getElementById('graph-detail-panel').style.display = 'none';
+  if (_returnToQuestionsDrawer) {
+    _returnToQuestionsDrawer = false;
+    setTimeout(() => window.toggleQuestionsDrawer?.(), 300);
+  }
+}
+
+export function setReturnToQuestions() {
+  _returnToQuestionsDrawer = true;
 }
 
 function refreshSelectionClasses() {
@@ -1917,6 +2174,167 @@ let _rewireUnlocked = false;
 let _edgeRewireUnlocked = false;
 let _edgeDirUnlocked = false;
 
+function showBranchPanel(v, event) {
+  const panel   = document.getElementById('graph-detail-panel');
+  const content = document.getElementById('detail-content');
+  panel.style.display = '';
+  panel.classList.remove('panel-edge');
+  panel.style.height = '';
+  if (panel._connRo) { panel._connRo.disconnect(); panel._connRo = null; }
+
+  // Position panel near cursor (same logic as showDetailPanel)
+  if (event) {
+    const container = document.getElementById('graph-container');
+    const rect = container.getBoundingClientRect();
+    const PW = panel.offsetWidth || 440, PH = panel.offsetHeight || 200;
+    let left = event.clientX - rect.left + 14;
+    let top  = event.clientY - rect.top  - PH / 2;
+    if (left + PW + 8 > container.clientWidth) left = event.clientX - rect.left - PW - 14;
+    left = Math.max(8, Math.min(left, container.clientWidth  - PW - 8));
+    top  = Math.max(8, Math.min(top,  container.clientHeight - PH - 8));
+    panel.style.left = left + 'px';
+    panel.style.top  = top  + 'px';
+  } else if (!panel.style.left && !panel.style.top) {
+    const container = document.getElementById('graph-container');
+    const PW = panel.offsetWidth || 440;
+    panel.style.left = Math.max(8, container.clientWidth - PW - 8) + 'px';
+    panel.style.top  = '60px';
+  }
+
+  // Highlight all edges in the group as selected
+  gZoom.select('.edges-layer').selectAll('.g-edge').classed('branch-active', false);
+  gZoom.select('.edges-layer').selectAll('.g-edge')
+    .filter(d => v.edgeIds.includes(d.id))
+    .classed('branch-active', true);
+
+  const hubTitle = nodes[v.hubNode.id]?.title ?? v.hubNode.id;
+  const edgeRows = v.edgeIds.map(eid => {
+    const e = edges[eid];
+    if (!e) return '';
+    const spokeId    = e.node_a_id === v.hubNode.id ? e.node_b_id : e.node_a_id;
+    const spokeTitle = nodes[spokeId]?.title ?? '?';
+    const dir        = e.bidirectional ? '↔' : (e.source_id === v.hubNode.id ? '→' : '←');
+    return `<div class="branch-edge-row" data-edge-id="${eid}">
+      <span class="branch-edge-endpoints"><span class="branch-edge-dir">${dir}</span> ${spokeTitle}</span>
+      <button class="branch-edge-view-btn" data-edge-id="${eid}">View</button>
+    </div>`;
+  }).join('');
+
+  content.innerHTML = `
+    <div class="branch-panel-header">
+      <span class="branch-icon">⑂</span>
+      <span class="branch-title">${v.edgeIds.length} connections — <strong>${hubTitle}</strong></span>
+    </div>
+    <p class="branch-body${v.body ? '' : ' branch-body-empty'}" title="Click to edit label">${v.body || 'No label'}</p>
+    <div class="branch-edges-list">${edgeRows}</div>
+    <div class="branch-footer">
+      <button class="branch-action-btn branch-delete-btn">Delete all</button>
+      ${currentState !== 'FirstOutline' ? `<button class="branch-action-btn branch-attach-btn">+ Add connection</button>` : ''}
+    </div>
+  `;
+
+  // Inline edit description — patches all edges in group (read-only in FirstOutline)
+  const bodyEl = content.querySelector('.branch-body');
+  if (currentState !== 'FirstOutline') bodyEl.title = 'Click to edit label';
+  bodyEl.addEventListener('click', () => {
+    if (currentState === 'FirstOutline') return;
+    if (bodyEl.contentEditable === 'true') return;
+    bodyEl.contentEditable = 'true'; bodyEl.spellcheck = false;
+    bodyEl.classList.add('branch-body-editing');
+    bodyEl.focus();
+    const range = document.createRange(); range.selectNodeContents(bodyEl); range.collapse(false);
+    window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range);
+    let saved = false;
+    const done = (cancel = false) => {
+      if (saved) return; saved = true;
+      bodyEl.contentEditable = 'false';
+      bodyEl.classList.remove('branch-body-editing');
+      if (cancel) { bodyEl.textContent = v.body || 'No label'; bodyEl.classList.toggle('branch-body-empty', !v.body); return; }
+      const val = bodyEl.textContent.trim() || null;
+      if (val === (v.body || null)) return;
+      for (const eid of v.edgeIds) {
+        apiRequest('PATCH', `${API}/edges/${eid}`, { body: val });
+        if (edges[eid]) edges[eid].body = val;
+      }
+      v.body = val || '';
+      bodyEl.textContent = val || 'No label';
+      bodyEl.classList.toggle('branch-body-empty', !val);
+      gZoom.select('.labels-layer').selectAll('.edge-label').filter(d => v.edgeIds.includes(d.id)).text(val || '');
+    };
+    bodyEl.addEventListener('blur', () => done(), { once: true });
+    bodyEl.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') { ev.preventDefault(); bodyEl.blur(); }
+      if (ev.key === 'Escape') { done(true); }
+    });
+  });
+
+  // View individual edge — clicking the row or the View button both work
+  const openEdge = (eid) => {
+    gZoom.select('.edges-layer').selectAll('.g-edge').classed('branch-active', false);
+    selectEdge(eid, null);
+  };
+  content.querySelectorAll('.branch-edge-row').forEach(row => {
+    row.addEventListener('click', () => openEdge(row.dataset.edgeId));
+  });
+  content.querySelectorAll('.branch-edge-view-btn').forEach(btn => {
+    btn.addEventListener('click', ev => { ev.stopPropagation(); openEdge(btn.dataset.edgeId); });
+  });
+
+  // Delete all
+  content.querySelector('.branch-delete-btn').addEventListener('click', () => {
+    showConfirm(`Delete all ${v.edgeIds.length} connections in this branch?`, async () => {
+      for (const eid of v.edgeIds) await fetch(`${API}/edges/${eid}`, { method: 'DELETE' });
+      deselectAll();
+      loadData();
+    }, { okLabel: 'Delete all', okClass: 'btn-danger' });
+  });
+
+  // Add connection (enters attach mode from hub node)
+  content.querySelector('.branch-attach-btn')?.addEventListener('click', () => {
+    _selectedBranchKey = null;
+    enterAttachFrom(v.hubNode.id);
+  });
+
+  // Shared edge color picker
+  const colorIdx     = nodeSimData[v.edgeIds[0]]?.colorIdx ?? 0;
+  const swatchClr    = i => EDGE_PALETTE[i]?.color ?? EDGE_PALETTE[0].color;
+  const dropContainer = document.getElementById('palette-dropdown-container');
+  dropContainer.style.display = '';
+  dropContainer.innerHTML = `
+    <details class="palette-details">
+      <summary style="background:${swatchClr(colorIdx)};" title="Change color"></summary>
+      <div class="palette-popup">
+        <div class="detail-palette">
+          ${EDGE_PALETTE.map((p, i) => `<button class="palette-swatch${i === colorIdx ? ' active' : ''}" data-idx="${i}" title="${p.name}" style="background:${swatchClr(i)};"></button>`).join('')}
+        </div>
+      </div>
+    </details>
+  `;
+  const detailsEl = dropContainer.querySelector('.palette-details');
+  const summaryEl = dropContainer.querySelector('summary');
+  detailsEl.addEventListener('toggle', () => {
+    document.getElementById('graph-container').classList.toggle('color-picking', detailsEl.open);
+  });
+  _setupPaletteDismiss(detailsEl);
+  dropContainer.querySelectorAll('.palette-swatch').forEach(btn => {
+    btn.onclick = () => {
+      const idx = parseInt(btn.dataset.idx);
+      _branchColors.set(v.key, idx);
+      for (const eid of v.edgeIds) {
+        if (!nodeSimData[eid]) nodeSimData[eid] = {};
+        nodeSimData[eid].colorIdx = idx;
+      }
+      saveSimData(); ticked();
+      dropContainer.querySelectorAll('.palette-swatch').forEach(s => s.classList.toggle('active', parseInt(s.dataset.idx) === idx));
+      summaryEl.style.background = swatchClr(idx);
+      detailsEl.removeAttribute('open');
+    };
+  });
+
+  document.getElementById('detail-edit-btn').style.display = 'none';
+  document.getElementById('detail-delete-btn').style.display = 'none';
+}
+
 export function showDetailPanel(type, id, event) {
   const panel   = document.getElementById('graph-detail-panel');
   const content = document.getElementById('detail-content');
@@ -1938,11 +2356,12 @@ export function showDetailPanel(type, id, event) {
       const otherId    = e.node_a_id === id ? e.node_b_id : e.node_a_id;
       const otherTitle = nodes[otherId]?.title ?? otherId;
       const dir        = e.bidirectional ? '↔' : (e.source_id === id ? '→' : '←');
-      return `<div class="detail-conn-row" data-edge-id="${e.id}" data-other-id="${otherId}">
-        <span class="detail-conn-dir" title="Click to change direction">${dir}</span>
-        <span class="detail-conn-node" title="Click to reconnect">${otherTitle}</span>
-        <span class="detail-conn-label${e.body ? '' : ' detail-conn-label-empty'}" title="Click to edit label">${e.body || 'add label…'}</span>
-        <button class="detail-conn-delete" title="Delete connection">×</button>
+      const ro = currentState === 'FirstOutline';
+      return `<div class="detail-conn-row${ro ? ' detail-conn-ro' : ''}" data-edge-id="${e.id}" data-other-id="${otherId}">
+        <span class="detail-conn-dir"${ro ? '' : ' title="Click to change direction"'}>${dir}</span>
+        <span class="detail-conn-node"${ro ? '' : ' title="Click to reconnect"'}>${otherTitle}</span>
+        <span class="detail-conn-label${e.body ? '' : ' detail-conn-label-empty'}"${ro ? '' : ' title="Click to edit label"'}>${e.body || (ro ? '' : 'add label…')}</span>
+        ${ro ? '' : '<button class="detail-conn-delete" title="Delete connection">×</button>'}
       </div>`;
     }).join('');
     content.innerHTML = `
@@ -1974,10 +2393,14 @@ export function showDetailPanel(type, id, event) {
 
     const createLinkBtn = content.querySelector('.detail-create-link-btn');
     if (createLinkBtn) {
-      createLinkBtn.addEventListener('click', () => {
-        _returnToNodeId = id;
-        enterAttachFrom(id);
-      });
+      if (currentState === 'FirstOutline') {
+        createLinkBtn.style.display = 'none';
+      } else {
+        createLinkBtn.addEventListener('click', () => {
+          _returnToNodeId = id;
+          enterAttachFrom(id);
+        });
+      }
     }
 
     const titleEl = content.querySelector('.editable-title');
@@ -2003,8 +2426,10 @@ export function showDetailPanel(type, id, event) {
         saved = true;
         const newTitle = input.textContent.trim();
         if (!newTitle || newTitle === nodes[id].title) { input.replaceWith(titleEl); return; }
+        const oldTitle = nodes[id].title;
         const ok = await apiRequest('PATCH', `${API}/nodes/${id}`, { title: newTitle });
         if (!ok) { saved = false; input.replaceWith(titleEl); return; }
+        if (currentState === 'FirstOutline') undoStack.push({ type: 'edit-node-title', id, oldTitle });
         addHistory(`Renamed "${nodes[id].title}" → "${newTitle}"`, '✎');
         nodes[id].title = newTitle;
         titleEl.textContent = newTitle;
@@ -2062,8 +2487,10 @@ export function showDetailPanel(type, id, event) {
         const newBody = editor.innerHTML.replace(/<br\s*\/?>/gi, '<br>').trim();
         const clean = newBody === '<br>' ? null : (newBody || null);
         if (clean === (nodes[id].body || null)) { editor.replaceWith(bodyEl); return; }
+        const oldBody = nodes[id].body ?? null;
         const ok = await apiRequest('PATCH', `${API}/nodes/${id}`, { body: clean });
         if (!ok) { saved = false; editor.replaceWith(bodyEl); return; }
+        if (currentState === 'FirstOutline') undoStack.push({ type: 'edit-node-body', id, oldBody });
         addHistory(`Edited notes for "${nodes[id].title}"`, '✎');
         nodes[id].body = clean;
         if (clean) bodyEl.innerHTML = clean;
@@ -2105,6 +2532,7 @@ export function showDetailPanel(type, id, event) {
     });
 
     content.querySelectorAll('.detail-conn-row').forEach(row => {
+      if (currentState === 'FirstOutline') return;
       const edgeId  = row.dataset.edgeId;
       const otherId = row.dataset.otherId;
 
@@ -2242,6 +2670,7 @@ export function showDetailPanel(type, id, event) {
     const detailsEl  = dropContainer.querySelector('.palette-details');
     const summaryEl  = dropContainer.querySelector('summary');
     const paletteEl  = dropContainer.querySelector('.detail-palette');
+    _setupPaletteDismiss(detailsEl);
     paletteEl.querySelectorAll('.palette-swatch').forEach(btn => {
       btn.onclick = () => {
         const idx = parseInt(btn.dataset.idx);
@@ -2264,17 +2693,18 @@ export function showDetailPanel(type, id, event) {
     const aTitle = nodes[e.node_a_id]?.title ?? e.node_a_id;
     const bTitle = nodes[e.node_b_id]?.title ?? e.node_b_id;
     const dirSymbol = () => e.bidirectional ? '↔' : (e.source_id === e.node_a_id ? '→' : '←');
+    const edgeRo = currentState === 'FirstOutline';
     content.innerHTML = `
-      <p class="editable-body${e.body ? '' : ' detail-body-empty'}" title="Click to edit label">${e.body || 'Add a label…'}</p>
+      <p class="editable-body${e.body ? '' : ' detail-body-empty'}"${edgeRo ? '' : ' title="Click to edit label"'}>${e.body || (edgeRo ? '' : 'Add a label…')}</p>
       <div class="edge-direction-row">
-        <span class="edge-node-label" data-field="node_a_id" data-staying-id="${e.node_b_id}" title="Click to reconnect">${aTitle}</span>
-        <span class="detail-conn-dir edge-dir-btn" title="Click to change direction">${dirSymbol()}</span>
-        <span class="edge-node-label" data-field="node_b_id" data-staying-id="${e.node_a_id}" title="Click to reconnect">${bTitle}</span>
+        <span class="edge-node-label"${edgeRo ? '' : ` data-field="node_a_id" data-staying-id="${e.node_b_id}" title="Click to reconnect"`}>${aTitle}</span>
+        <span class="detail-conn-dir edge-dir-btn"${edgeRo ? '' : ' title="Click to change direction"'}>${dirSymbol()}</span>
+        <span class="edge-node-label"${edgeRo ? '' : ` data-field="node_b_id" data-staying-id="${e.node_a_id}" title="Click to reconnect"`}>${bTitle}</span>
       </div>
     `;
 
     const bodyEl = content.querySelector('.editable-body');
-    bodyEl.addEventListener('click', () => {
+    if (!edgeRo) bodyEl.addEventListener('click', () => {
       const inp = document.createElement('div');
       inp.className = 'inline-edge-label-input';
       inp.contentEditable = 'true'; inp.spellcheck = false;
@@ -2305,7 +2735,7 @@ export function showDetailPanel(type, id, event) {
     });
 
     const dirBtn = content.querySelector('.edge-dir-btn');
-    dirBtn.addEventListener('click', async () => {
+    if (!edgeRo) dirBtn.addEventListener('click', async () => {
       if (!_edgeDirUnlocked) {
         showConfirm('Change direction of this connection?', () => {
           _edgeDirUnlocked = true;
@@ -2329,7 +2759,7 @@ export function showDetailPanel(type, id, event) {
       ticked();
     });
 
-    content.querySelectorAll('.edge-node-label').forEach(lbl => {
+    if (!edgeRo) content.querySelectorAll('.edge-node-label').forEach(lbl => {
       lbl.addEventListener('click', () => {
         if (!_edgeRewireUnlocked) {
           showConfirm('Reconnect this connection to a different idea?', () => {
@@ -2363,6 +2793,10 @@ export function showDetailPanel(type, id, event) {
     const detailsEl = dropContainer.querySelector('.palette-details');
     const summaryEl = dropContainer.querySelector('summary');
     const paletteEl = dropContainer.querySelector('.detail-palette');
+    detailsEl.addEventListener('toggle', () => {
+      document.getElementById('graph-container').classList.toggle('color-picking', detailsEl.open);
+    });
+    _setupPaletteDismiss(detailsEl);
     paletteEl.querySelectorAll('.palette-swatch').forEach(btn => {
       btn.onclick = () => {
         const idx = parseInt(btn.dataset.idx);
@@ -2381,6 +2815,69 @@ export function showDetailPanel(type, id, event) {
 
   document.getElementById('btn-enter-focus').style.display = type === 'node' ? '' : 'none';
 
+  // ---- Questions panel ----
+  const qPanel   = document.getElementById('detail-questions-panel');
+  const qList    = document.getElementById('detail-questions-list');
+  const qInput   = document.getElementById('detail-questions-input');
+  const qAddBtn  = document.getElementById('detail-questions-add');
+  const qToggle  = document.getElementById('btn-detail-questions');
+  const targetType = type; // 'node' or 'edge'
+
+  qPanel.style.display = 'none';
+  qInput.value = '';
+
+  const renderQuestions = (questions) => {
+    if (!questions.length) {
+      qList.innerHTML = '<p class="detail-no-questions">No questions yet.</p>';
+      return;
+    }
+    qList.innerHTML = questions.map(q => `
+      <div class="detail-question-row" data-id="${q.id}">
+        <span class="detail-question-text">${q.text}</span>
+        <button class="detail-question-delete" data-id="${q.id}" title="Delete question">×</button>
+      </div>
+    `).join('');
+    qList.querySelectorAll('.detail-question-delete').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await fetch(`${API}/questions/${btn.dataset.id}`, { method: 'DELETE' });
+        const updated = await fetch(`${API}/questions?target_id=${id}`).then(r => r.json());
+        renderQuestions(updated);
+      });
+    });
+  };
+
+  const openQuestions = async () => {
+    const questions = await fetch(`${API}/questions?target_id=${id}`).then(r => r.json());
+    renderQuestions(questions);
+    qPanel.style.display = '';
+    qInput.focus();
+  };
+
+  qToggle.onclick = () => {
+    if (qPanel.style.display === 'none') {
+      openQuestions();
+    } else {
+      qPanel.style.display = 'none';
+    }
+  };
+
+  const submitQuestion = async () => {
+    const text = qInput.value.trim();
+    if (!text) return;
+    qInput.value = '';
+    await fetch(`${API}/questions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_id: id, target_type: targetType, text }),
+    });
+    addHistory(`Asked: "${text}"`, '?');
+    const updated = await fetch(`${API}/questions?target_id=${id}`).then(r => r.json());
+    renderQuestions(updated);
+  };
+
+  qAddBtn.onclick = submitQuestion;
+  qInput.onkeydown = e => { if (e.key === 'Enter') submitQuestion(); };
+
   if (event) {
     const container = document.getElementById('graph-container');
     const rect = container.getBoundingClientRect();
@@ -2392,6 +2889,11 @@ export function showDetailPanel(type, id, event) {
     top  = Math.max(8, Math.min(top,  container.clientHeight - PH - 8));
     panel.style.left = left + 'px';
     panel.style.top  = top  + 'px';
+  } else if (!panel.style.left && !panel.style.top) {
+    const container = document.getElementById('graph-container');
+    const PW = panel.offsetWidth || 440;
+    panel.style.left = Math.max(8, container.clientWidth - PW - 8) + 'px';
+    panel.style.top  = '60px';
   }
 }
 
@@ -2520,6 +3022,7 @@ export function exitDeepFocusMode() {
 let _attachHeld = false;
 document.addEventListener('keydown', e => {
   if (e.key !== 'a' && e.key !== 'A') return;
+  if (currentState === 'FirstOutline') return;
   if (e.repeat) return;
   const tag = document.activeElement?.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
@@ -2528,6 +3031,9 @@ document.addEventListener('keydown', e => {
   if (document.getElementById('modal-overlay')?.classList.contains('open')) return;
   if (document.getElementById('attach-result')?.classList.contains('visible')) return;
   if (document.getElementById('node-result')?.classList.contains('visible')) return;
+  if (document.getElementById('graph-detail-panel')?.style.display !== 'none') return;
+  if (document.getElementById('history-drawer')?.classList.contains('open')) return;
+  if (document.getElementById('questions-drawer')?.classList.contains('open')) return;
   toggleAttachMode(true); _attachHeld = true;
 });
 document.addEventListener('keyup', e => {
@@ -2540,6 +3046,7 @@ document.addEventListener('keyup', e => {
 // ---- Add Node (graph-coupled, lives here) ----
 
 export async function openAddNode() {
+  if (currentState === 'FirstOutline') return;
   if (document.getElementById('node-result').classList.contains('visible')) {
     showPillError('node-result-error', 'node-title-input'); return;
   }
@@ -2569,6 +3076,54 @@ export async function openAddNode() {
   }
   showNodeResult(newNode.id);
 }
+
+// ---- Cmd+Z Undo (FirstOutline only) ----
+
+document.addEventListener('keydown', async (e) => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (!mod || e.key !== 'z') return;
+  if (currentState !== 'FirstOutline') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+  e.preventDefault();
+  const entry = undoStack.pop();
+  if (!entry) return;
+
+  if (entry.type === 'delete-node') {
+    const res = await fetch(`${API}/nodes`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: entry.node.title, body: entry.node.body ?? null, node_type: entry.node.node_type }),
+    });
+    if (!res.ok) { undoStack.push(entry); return; }
+    const newNode = await res.json();
+    for (const edge of entry.edges) {
+      const aId  = edge.node_a_id === entry.node.id ? newNode.id : edge.node_a_id;
+      const bId  = edge.node_b_id === entry.node.id ? newNode.id : edge.node_b_id;
+      const srcId = edge.source_id ? (edge.source_id === entry.node.id ? newNode.id : edge.source_id) : null;
+      await fetch(`${API}/edges`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ node_a_id: aId, node_b_id: bId, body: edge.body ?? null, bidirectional: edge.bidirectional, source_id: srcId }),
+      });
+    }
+    await loadData();
+    showToast(`Undo: restored "${entry.node.title}"`);
+  } else if (entry.type === 'delete-edge') {
+    const edge = entry.edge;
+    const res = await fetch(`${API}/edges`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ node_a_id: edge.node_a_id, node_b_id: edge.node_b_id, body: edge.body ?? null, bidirectional: edge.bidirectional, source_id: edge.source_id ?? null }),
+    });
+    if (res.ok) { await loadData(); showToast('Undo: restored connection'); }
+    else undoStack.push(entry);
+  } else if (entry.type === 'edit-node-title') {
+    const ok = await apiRequest('PATCH', `${API}/nodes/${entry.id}`, { title: entry.oldTitle });
+    if (ok) { await loadData(); showToast('Undo: reverted title'); }
+    else undoStack.push(entry);
+  } else if (entry.type === 'edit-node-body') {
+    const ok = await apiRequest('PATCH', `${API}/nodes/${entry.id}`, { body: entry.oldBody });
+    if (ok) { await loadData(); showToast('Undo: reverted notes'); }
+    else undoStack.push(entry);
+  }
+});
 
 // ---- Window exports (for inline HTML handlers) ----
 

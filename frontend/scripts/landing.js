@@ -1,17 +1,25 @@
-import { API, loadData } from './api.js';
+import { API, loadData, setAppState } from './api.js';
 import { showConfirm } from './ui.js';
 import { showQuestionnaire } from './questionnaire.js';
 import { clearHistory } from './history.js';
+import { showResearch } from './research.js';
+
+async function _restoreState() {
+  const res = await fetch(`${API}/state`).catch(() => null);
+  if (!res?.ok) return;
+  const { state } = await res.json();
+  setAppState(state);
+  if (state === 'FirstResearch') showResearch();
+}
 
 export async function initLanding() {
   const screen = document.getElementById('landing-screen');
 
   if (sessionStorage.getItem('sessionStarted')) {
-    loadData();
-    setTimeout(() => {
-      screen.classList.add('landing-exit');
-      setTimeout(() => { screen.style.display = 'none'; }, 350);
-    }, 1000);
+    await loadData();
+    screen.classList.add('landing-exit');
+    setTimeout(() => { screen.style.display = 'none'; }, 350);
+    _restoreState();
     return;
   }
 
@@ -28,10 +36,11 @@ export async function initLanding() {
     document.getElementById('landing-or').style.display = '';
   }
 
-  document.getElementById('btn-continue').addEventListener('click', () => {
+  document.getElementById('btn-continue').addEventListener('click', async () => {
     sessionStorage.setItem('sessionStarted', '1');
-    loadData();
+    await loadData();
     _hideLanding();
+    _restoreState();
   });
 
   document.getElementById('btn-new-subject-toggle').addEventListener('click', () => {
@@ -49,14 +58,6 @@ export async function initLanding() {
     showQuestionnaire(title, async () => {
       clearHistory();
       await fetch(`${API}/graph?full=true`, { method: 'DELETE' });
-      const nodeRes = await fetch(`${API}/nodes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, node_type: 'Subject' }),
-      });
-      if (!nodeRes.ok) {
-        return (await nodeRes.json()).detail ?? 'Something went wrong.';
-      }
       sessionStorage.setItem('sessionStarted', '1');
       return null;
     });
