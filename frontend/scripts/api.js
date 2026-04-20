@@ -2,7 +2,7 @@ import algoliasearch from 'algoliasearch';
 import { renderNodes, renderEdges, showConfirm } from './ui.js';
 import { renderGraph } from './graph.js';
 
-export const API = 'http://localhost:8000';
+export const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 export let nodes = {};
 export let edges = {};
 export let currentState = null;
@@ -26,10 +26,11 @@ export function setAppState(state) {
   const reflectionTab = document.getElementById('reflection-tab');
   if (reflectionTab) reflectionTab.style.display = secondOutline ? '' : 'none';
 
-  // Add node/edge UI — hidden in FirstOutline
+  // Add node UI — hidden in FirstOutline; attach stays visible in all states
   const hide = v => v ? 'none' : '';
-  document.getElementById('btn-attach')?.style.setProperty('display', hide(firstOutline));
   document.getElementById('btn-add-idea')?.style.setProperty('display', hide(firstOutline));
+  // Regenerate button — only in FirstOutline (disabled state managed by versions.js)
+  document.getElementById('btn-regenerate')?.style.setProperty('display', firstOutline ? '' : 'none');
   document.getElementById('canvas-ctx-menu')?.style.setProperty('display', hide(firstOutline));
   const connectBtn = document.querySelector('#connect-pill .btn-connect');
   if (connectBtn) connectBtn.style.display = hide(firstOutline);

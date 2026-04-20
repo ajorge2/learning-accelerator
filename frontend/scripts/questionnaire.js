@@ -1,7 +1,8 @@
 import { loadData, API, setAppState } from './api.js';
-import { addHistory } from './history.js';
+import { addHistory, renderVersionHistory } from './history.js';
 import { showTour } from './ui.js';
 import { toggleQuestionsDrawer } from './questions.js';
+import { saveGenParams, clearVersions, pushSnapshot, updateRegenerateBtn } from './versions.js';
 
 export const FIRST_OUTLINE_TOUR = [
   {
@@ -33,17 +34,20 @@ export function showQuestionnaire(subjectTitle, createFn) {
   const knowInput = document.getElementById('q-knowledge');
   const btn       = document.getElementById('btn-questionnaire-continue');
   const skipBtn   = document.getElementById('btn-questionnaire-skip');
-  const pdfBtn    = document.getElementById('btn-upload-pdf');
-  const pdfInput  = document.getElementById('q-pdf-input');
-  const pdfStatus = document.getElementById('q-pdf-status');
+  const pdfBtn      = document.getElementById('btn-upload-pdf');
+  const pdfClearBtn = document.getElementById('btn-clear-pdf');
+  const pdfInput    = document.getElementById('q-pdf-input');
+  const pdfStatus   = document.getElementById('q-pdf-status');
 
   // reset
-  slider.value        = 5;
+  slider.value          = 5;
   sliderVal.textContent = '5';
-  goalInput.value     = '';
-  knowInput.value     = '';
+  goalInput.value       = '';
+  knowInput.value       = '';
   pdfStatus.textContent = '';
-  btn.disabled        = true;
+  btn.disabled          = true;
+  pdfBtn.style.display      = '';
+  pdfClearBtn.style.display = 'none';
 
   const checkEnabled = () => {
     const touched = goalInput.value.trim() || knowInput.value.trim() || slider.value !== '5';
@@ -55,11 +59,20 @@ export function showQuestionnaire(subjectTitle, createFn) {
   knowInput.oninput = checkEnabled;
 
   pdfBtn.onclick = () => pdfInput.click();
+  pdfClearBtn.onclick = () => {
+    knowInput.value       = '';
+    pdfStatus.textContent = '';
+    pdfBtn.style.display      = '';
+    pdfClearBtn.style.display = 'none';
+    checkEnabled();
+  };
   pdfInput.onchange = async () => {
     const file = pdfInput.files[0];
     if (!file) return;
     pdfStatus.textContent = 'Reading PDF…';
     pdfBtn.disabled = true;
+    btn.disabled = true;
+    skipBtn.disabled = true;
     try {
       const form = new FormData();
       form.append('file', file);
@@ -69,14 +82,17 @@ export function showQuestionnaire(subjectTitle, createFn) {
       const data = await res.json();
       if (data.knowledge) {
         knowInput.value = data.knowledge;
-        checkEnabled();
         pdfStatus.textContent = 'Extracted from PDF — feel free to edit.';
+        pdfBtn.style.display      = 'none';
+        pdfClearBtn.style.display = '';
       }
     } catch (e) {
       pdfStatus.textContent = 'Failed to read PDF.';
       console.error(e);
     } finally {
-      pdfBtn.disabled = false;
+      pdfBtn.disabled  = false;
+      skipBtn.disabled = false;
+      checkEnabled(); // re-enables btn only if a field has been filled
       pdfInput.value = '';
     }
   };
@@ -85,8 +101,9 @@ export function showQuestionnaire(subjectTitle, createFn) {
   const allInputs = [goalInput, knowInput, slider];
 
   const setLoading = (loading, showToast = false) => {
-    btn.disabled     = loading;
-    skipBtn.disabled = loading;
+    btn.disabled          = loading;
+    skipBtn.disabled      = loading;
+    pdfClearBtn.disabled  = loading;
     allInputs.forEach(el => { el.disabled = loading; });
     toast.textContent = showToast ? 'Generating idea map…' : '';
     toast.classList.toggle('visible', loading && showToast);
@@ -96,6 +113,9 @@ export function showQuestionnaire(subjectTitle, createFn) {
     const goalVal       = goalInput.value.trim();
     const knowVal       = knowInput.value.trim();
     const importanceVal = parseInt(slider.value, 10);
+
+    clearVersions();
+    if (withNotes) saveGenParams(subjectTitle, knowInput.value.trim(), goalVal, importanceVal);
 
     setLoading(true, withNotes);
     const err = await createFn();
@@ -108,7 +128,7 @@ export function showQuestionnaire(subjectTitle, createFn) {
       const res = await fetch(`${API}/graph/initialize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject: subjectTitle, notes: knowInput.value }),
+        body: JSON.stringify({ subject: subjectTitle, notes: knowInput.value, goal: goalVal, importance: importanceVal }),
       });
       const data = await res.json().catch(() => null);
       for (const node of data?.created_nodes ?? []) {
@@ -128,6 +148,11 @@ export function showQuestionnaire(subjectTitle, createFn) {
     });
     setAppState('FirstOutline');
     await loadData();
+    if (withNotes) {
+      pushSnapshot();
+      renderVersionHistory();
+      updateRegenerateBtn();
+    }
     _hideQuestionnaire();
     if (withNotes) {
       showTour(FIRST_OUTLINE_TOUR);

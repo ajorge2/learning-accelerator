@@ -72,6 +72,18 @@ class QuestionRequest(BaseModel):
 class InitializeGraphRequest(BaseModel):
     subject: str
     notes: str = ""
+    goal: str = ""
+    importance: int = 5
+
+class RegenerateGraphRequest(BaseModel):
+    subject: str
+    notes: str = ""
+    goal: str = ""
+    importance: int = 5
+
+class RestoreVersionRequest(BaseModel):
+    nodes: list[dict]
+    edges: list[dict]
 
 class InferExpertiseRequest(BaseModel):
     subject: str
@@ -198,8 +210,25 @@ def export_graph():
 @app.post("/graph/initialize", status_code=201)
 def initialize_graph(req: InitializeGraphRequest):
     try:
-        outline = llm_service.gen_outline_from_notes(req.subject, req.notes)
+        outline = llm_service.gen_outline_from_notes(req.subject, req.notes, req.goal, req.importance)
         return graph.initialize_graph(db.DEFAULT_USER_ID, outline.model_dump(exclude_none=True))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/graph/regenerate", status_code=201)
+def regenerate_graph(req: RegenerateGraphRequest):
+    try:
+        graph.clear_graph(db.DEFAULT_USER_ID)
+        outline = llm_service.gen_outline_from_notes(req.subject, req.notes, req.goal, req.importance)
+        return graph.initialize_graph(db.DEFAULT_USER_ID, outline.model_dump(exclude_none=True))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/graph/restore-version", status_code=200)
+def restore_version(req: RestoreVersionRequest):
+    try:
+        db.restore_graph_version(db.DEFAULT_USER_ID, req.nodes, req.edges)
+        return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

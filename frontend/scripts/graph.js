@@ -101,6 +101,7 @@ let _selectedBranchKey = null;
 const _branchColors = new Map(); // branchKey → colorIdx (independent of individual edge colors)
 let _yEdgeIndex  = new Map(); // edgeId → branchKey — updated each tick, read by edge hover handlers
 let _yBranchLabel = new Map(); // branchKey → isFirst edgeId (the one whose label sits on the stem)
+let _orbDataCache = []; // last computed orb data — reused when simulation is settled
 let selectedType  = null;  // 'node' | 'edge'
 let hoveredNodeId = null;
 let focusDistances = null;
@@ -215,7 +216,7 @@ function applyFocusView() {
     simulation.velocityDecay(0.78);
   } else {
     if (!floatMode) simulation.nodes().forEach(n => { n.fx = n.x; n.fy = n.y; });
-    else simulation.nodes().forEach(n => { n.fx = null; n.fy = null; });
+    else { simulation.nodes().forEach(n => { n.fx = null; n.fy = null; }); _pinSubjectTop(); }
     simulation.force('x', null).force('y', null);
     simulation.force('boundary', makeBoundaryForce());
     simulation.force('link').distance(d => {
@@ -233,6 +234,12 @@ function applyFocusView() {
   updateVisualScales();
   _syncGraphOptionsBtn();
   if (isolatedNodes !== null) applyIsolationView();
+}
+
+let _vsRafId = null;
+function _scheduleVisualScales() {
+  if (_vsRafId !== null) return; // already queued for next frame
+  _vsRafId = requestAnimationFrame(() => { _vsRafId = null; updateVisualScales(); });
 }
 
 function updateVisualScales() {
@@ -257,6 +264,9 @@ function updateVisualScales() {
   svgRoot.select('#arrow')
     .attr('markerWidth', 12 / currentK)
     .attr('markerHeight', 8.5 / currentK);
+
+  gZoom.select('.branch-orbs-layer').selectAll('.branch-orb-circle')
+    .attr('r', 3.5 / currentK);
 }
 
 export function zoomIn()  { svgRoot.transition().duration(420).call(zoomBehavior.scaleBy, 1.5); }
@@ -363,6 +373,13 @@ function _syncGraphOptionsBtn() {
   document.getElementById('btn-lasso-type')?.classList.toggle('lasso-hidden', hideFocusCtrl);
 }
 
+function _pinSubjectTop() {
+  // Pin the subject's y near the very top of the allowed space (boundary mt = -NODE_R*2 ≈ -28).
+  // fx stays null so it can drift horizontally.
+  const subjectNode = simulation.nodes().find(n => n.node_type === 'Subject');
+  if (subjectNode) subjectNode.fy = -10;
+}
+
 export function toggleFloatMode() {
   floatMode = !floatMode;
   const btn = document.getElementById('btn-float-toggle');
@@ -370,6 +387,7 @@ export function toggleFloatMode() {
   if (floatMode) {
     if (_bendAnimId !== null) { cancelAnimationFrame(_bendAnimId); _bendAnimId = null; }
     simulation.nodes().forEach(n => { n.fx = null; n.fy = null; });
+    _pinSubjectTop();
     simulation.alpha(0.3).restart(); // simulation drives ticked()
   } else {
     simulation.nodes().forEach(n => { n.fx = n.x; n.fy = n.y; n.vx = 0; n.vy = 0; });
@@ -496,9 +514,10 @@ export function initGraph() {
       gZoom.attr('transform', e.transform);
       svgRoot.select('#grid-pattern').attr('patternTransform', e.transform);
       currentK = e.transform.k;
-      updateVisualScales();
+      _scheduleVisualScales();
       const slider = document.getElementById('zoom-slider');
       if (slider && document.activeElement !== slider) slider.value = e.transform.k;
+      _cullNodeLabels();
     });
   svgRoot.call(zoomBehavior);
 
@@ -786,6 +805,10 @@ export function initGraph() {
     .force('charge',   d3.forceManyBody().strength(-650).distanceMin(NODE_R))
     .force('collide',  d3.forceCollide(NODE_R * 2.2).strength(0.25))
     .force('boundary', makeBoundaryForce())
+    .force('subjectY', d3.forceY(d => d.node_type === 'Subject' ? -10 : graphH * 0.72)
+      .strength(d => d.node_type === 'Subject' ? 0.25 : 0.06))
+    .force('subjectX', d3.forceX(graphW * 0.5)
+      .strength(d => d.node_type === 'Subject' ? 0.18 : 0))
     .on('tick', ticked);
 }
 
@@ -1007,6 +1030,7 @@ export function renderGraph() {
   simulation.force('link').links(simEdges);
   _initEdgeBends(simEdges);
   if (floatMode) {
+    _pinSubjectTop();
     simulation.alpha(0.3).restart(); // simulation drives ticked(), which steps bends
     ticked(); // immediately apply updated bend state (don't wait for first sim tick)
   } else {
@@ -1117,9 +1141,89 @@ function _startBendAnim() {
   _bendAnimId = requestAnimationFrame(step);
 }
 
+
+let _cullLastRun = 0;
+function _cullNodeLabels() {
+  const now = performance.now();
+  if (now - _cullLastRun < 80) return; // throttle to ~12fps — labels don't need 60fps updates
+  _cullLastRun = now;
+  if (!gZoom || !svgRoot) return;
+  const allGs = gZoom.select('.nodes-layer').selectAll('.g-node');
+  if (allGs.empty()) return;
+
+  const t = d3.zoomTransform(svgRoot.node()); // current pan/zoom
+  const svgEl = svgRoot.node();
+  const svgW  = svgEl?.clientWidth  || graphW;
+  const svgH  = svgEl?.clientHeight || graphH;
+  const subjectId  = Object.values(nodes).find(n => n.node_type === 'Subject')?.id;
+  const subjectSim = simulation.nodes().find(n => n.id === subjectId);
+
+  // Convert graph coords → screen coords
+  const toScreen = (gx, gy) => ({ sx: gx * t.k + t.x, sy: gy * t.k + t.y });
+
+  // Is a node's centre visible in the SVG viewport?
+  const onScreen = (gx, gy) => {
+    const { sx, sy } = toScreen(gx, gy);
+    return sx >= -NODE_R * t.k && sx <= svgW + NODE_R * t.k &&
+           sy >= -NODE_R * t.k && sy <= svgH + NODE_R * t.k;
+  };
+
+  // Screen-space label dimensions (constant regardless of zoom — labels are CSS-scaled)
+  const CHAR_W_SCR = 6.2;
+  const LABEL_H_SCR = 13;
+  const PAD_SCR = 4;
+  const LABEL_Y_OFF = 18; // px above node centre in screen space
+
+  const labelBox = (gx, gy, title, distFactor = 1) => {
+    const { sx, sy } = toScreen(gx, gy);
+    // Shrink the collision box for closer nodes (distFactor 0→1 = closest→furthest)
+    const shrink = 0.55 + 0.45 * distFactor; // 0.55 at dist=0, 1.0 at dist=max
+    const hw = ((title.length * CHAR_W_SCR) / 2 + PAD_SCR) * shrink;
+    const hh = (LABEL_H_SCR / 2 + PAD_SCR) * shrink;
+    return { cx: sx, cy: sy - LABEL_Y_OFF * t.k, hw, hh };
+  };
+
+  const overlaps = (a, b) =>
+    Math.abs(a.cx - b.cx) < a.hw + b.hw && Math.abs(a.cy - b.cy) < a.hh + b.hh;
+
+  const MAX_SHOWN = 5;
+  const shown = [];
+  const visibleIds = new Set();
+
+  // Subject: always shown if on screen
+  if (subjectId && subjectSim && onScreen(subjectSim.x ?? 0, subjectSim.y ?? 0)) {
+    visibleIds.add(subjectId);
+    shown.push(labelBox(subjectSim.x ?? 0, subjectSim.y ?? 0, nodes[subjectId]?.title ?? ''));
+  }
+
+  // Others: on-screen nodes sorted by distance to subject, greedy non-overlap pick
+  const sx0 = subjectSim?.x ?? 0, sy0 = subjectSim?.y ?? 0;
+  const candidates = simulation.nodes()
+    .filter(n => n.id !== subjectId && onScreen(n.x ?? 0, n.y ?? 0))
+    .map(n => {
+      const dx = (n.x ?? 0) - sx0, dy = (n.y ?? 0) - sy0;
+      return { id: n.id, dist: Math.sqrt(dx * dx + dy * dy), gx: n.x ?? 0, gy: n.y ?? 0 };
+    })
+    .sort((a, b) => a.dist - b.dist);
+
+  const maxDist = candidates.length ? candidates[candidates.length - 1].dist || 1 : 1;
+  for (const c of candidates) {
+    if (visibleIds.size >= MAX_SHOWN + 1) break;
+    const box = labelBox(c.gx, c.gy, nodes[c.id]?.title ?? '', c.dist / maxDist);
+    if (!shown.some(b => overlaps(box, b))) {
+      visibleIds.add(c.id);
+      shown.push(box);
+    }
+  }
+
+  allGs.select('text').style('opacity', d => visibleIds.has(d.id) ? 1 : 0);
+}
+
 function ticked() {
   gZoom.select('.nodes-layer').selectAll('.g-node')
     .attr('transform', d => `translate(${d.x ?? 0},${d.y ?? 0})`);
+
+  _cullNodeLabels();
 
   if (_attachSource && !_ghostHidden) {
     const ghost = gZoom.select('.attach-ghost');
@@ -1144,62 +1248,75 @@ function ticked() {
   }
 
   // Build Y-groups: edges with identical label that share one endpoint.
-  // Rendered as a branching Y instead of N separate lines.
-  const _yEdge = new Map(); // edgeId → { hubNode, spokeNode, stemX, stemY, isFirst, key, edgeIds, body }
-  if (focusDistances === null) {
+  // _orbDataCache stores group structure (IDs only, no live node refs).
+  // stemX/stemY are recomputed every tick from current sim positions — never stale.
+  const _simAlpha = simulation.alpha();
+  const _simNodeMap = new Map(simulation.nodes().map(n => [n.id, n]));
+
+  if (focusDistances === null && _simAlpha >= 0.008) {
+    // Rebuild group structure when sim is actively moving
     const _eList = [];
     gZoom.select('.edges-layer').selectAll('.g-edge').each(function(d) {
       const sObj = typeof d.source === 'object' ? d.source : null;
       const tObj = typeof d.target === 'object' ? d.target : null;
       if (sObj && tObj && d.body?.trim()) {
-        _eList.push({ id: d.id, body: d.body.trim(), sObj, tObj, bidir: d.bidirectional, src_id: d.source_id });
+        _eList.push({ id: d.id, body: d.body.trim(), sObjId: sObj.id, tObjId: tObj.id, bidir: d.bidirectional, src_id: d.source_id });
       }
     });
     const _byHubBody = new Map();
     for (const e of _eList) {
-      // For bidirectional edges either endpoint can be the hub.
-      // For directed edges only the actual source can be the hub.
-      const candidates = e.bidir
-        ? [[e.sObj, e.tObj], [e.tObj, e.sObj]]
-        : [[e.src_id === e.sObj.id ? e.sObj : e.tObj,
-            e.src_id === e.sObj.id ? e.tObj : e.sObj]];
-      for (const [hubNode, spokeNode] of candidates) {
-        const k = `${hubNode.id}||${e.body}`;
-        if (!_byHubBody.has(k)) _byHubBody.set(k, { hubNode, members: [], body: e.body });
-        _byHubBody.get(k).members.push({ id: e.id, spokeNode });
+      const pairs = e.bidir
+        ? [[e.sObjId, e.tObjId], [e.tObjId, e.sObjId]]
+        : [[e.src_id === e.sObjId ? e.sObjId : e.tObjId, e.src_id === e.sObjId ? e.tObjId : e.sObjId]];
+      for (const [hubId, spokeId] of pairs) {
+        const k = `${hubId}||${e.body}`;
+        if (!_byHubBody.has(k)) _byHubBody.set(k, { hubId, members: [], body: e.body });
+        _byHubBody.get(k).members.push({ id: e.id, spokeId });
       }
     }
     const _claimed = new Set();
+    _orbDataCache = [];
     [..._byHubBody.values()]
       .filter(g => g.members.length >= 2)
       .sort((a, b) => b.members.length - a.members.length)
-      .forEach(({ hubNode, members, body: groupBody }) => {
+      .forEach(({ hubId, members, body: groupBody }) => {
         const free = members.filter(m => !_claimed.has(m.id));
         if (free.length < 2) return;
-        const hx = hubNode.x ?? 0, hy = hubNode.y ?? 0;
-        const cx = free.reduce((s, m) => s + (m.spokeNode.x ?? 0), 0) / free.length;
-        const cy = free.reduce((s, m) => s + (m.spokeNode.y ?? 0), 0) / free.length;
-        const stemX = hx + (cx - hx) * 0.5;
-        const stemY = hy + (cy - hy) * 0.5;
-        const groupKey = `${hubNode.id}||${groupBody}`;
+        const groupKey = `${hubId}||${groupBody}`;
         const edgeIds  = free.map(m => m.id);
-        free.forEach((m, i) => {
-          _claimed.add(m.id);
-          _yEdge.set(m.id, { hubNode, spokeNode: m.spokeNode, stemX, stemY, isFirst: i === 0, key: groupKey, edgeIds, body: groupBody });
-        });
+        free.forEach(m => _claimed.add(m.id));
+        // Store IDs only — positions resolved each tick from _simNodeMap
+        _orbDataCache.push({ hubId, spokeIds: free.map(m => m.spokeId), key: groupKey, edgeIds, body: groupBody });
       });
+
+    _yEdgeIndex.clear();
+    _yBranchLabel.clear();
+    _orbDataCache.forEach(orb => {
+      orb.edgeIds.forEach((eid, i) => {
+        _yEdgeIndex.set(eid, orb.key);
+        if (i === 0) _yBranchLabel.set(orb.key, eid);
+      });
+    });
   }
 
-  // Sync module-level indices for edge hover handlers
-  _yEdgeIndex.clear();
-  _yBranchLabel.clear();
-  _yEdge.forEach((v, eid) => {
-    _yEdgeIndex.set(eid, v.key);
-    if (v.isFirst) _yBranchLabel.set(v.key, eid);
+  // Compute stemX/stemY from live positions every tick (cheap — just arithmetic)
+  const _orbDataArr = _orbDataCache.map(orb => {
+    const hubNode = _simNodeMap.get(orb.hubId);
+    const hx = hubNode?.x ?? 0, hy = hubNode?.y ?? 0;
+    const spokeNodes = orb.spokeIds.map(id => _simNodeMap.get(id)).filter(Boolean);
+    const cx = spokeNodes.reduce((s, n) => s + (n.x ?? 0), 0) / (spokeNodes.length || 1);
+    const cy = spokeNodes.reduce((s, n) => s + (n.y ?? 0), 0) / (spokeNodes.length || 1);
+    return { ...orb, hubNode, spokeNodes, stemX: hx + (cx - hx) * 0.5, stemY: hy + (cy - hy) * 0.5 };
   });
 
-  // Render orbs at Y-group stem intersections
-  const _orbDataArr = [..._yEdge.values()].filter(v => v.isFirst);
+  // Per-edge lookup for edge rendering (replaces old _yEdge Map)
+  const _yEdge = new Map();
+  _orbDataArr.forEach(orb => {
+    orb.edgeIds.forEach((eid, i) => {
+      const spokeNode = _simNodeMap.get(orb.spokeIds[i]);
+      if (spokeNode) _yEdge.set(eid, { hubNode: orb.hubNode, spokeNode, stemX: orb.stemX, stemY: orb.stemY, isFirst: i === 0 });
+    });
+  });
   gZoom.select('.branch-orbs-layer')
     .selectAll('.g-branch-orb')
     .data(_orbDataArr, v => v.key)
@@ -1209,44 +1326,41 @@ function ticked() {
         g.append('line').attr('class', 'branch-stem-vis').attr('x2', 0).attr('y2', 0);
         g.append('line').attr('class', 'branch-stem-hit').attr('x2', 0).attr('y2', 0);
         g.append('circle').attr('r', 3.5).attr('class', 'branch-orb-circle');
+        // Bind handlers once on enter — read fresh datum via d3.select(this).datum() at event time
+        g.on('click', function(ev) {
+          const v = d3.select(this).datum();
+          ev.stopPropagation();
+          _selectedBranchKey = v.key;
+          selectedId   = null;
+          selectedType = null;
+          gZoom.select('.branch-orbs-layer').selectAll('.g-branch-orb')
+            .classed('branch-selected', d => d.key === v.key);
+          refreshSelectionClasses();
+          showBranchPanel(v, ev);
+        });
+        g.on('mouseenter', function() {
+          const v = d3.select(this).datum();
+          d3.select(this).classed('hovered', true);
+          gZoom.select('.edges-layer').selectAll('.g-edge')
+            .filter(d => v.edgeIds.includes(d.id)).classed('branch-hovered', true);
+          const labelId = _yBranchLabel.get(v.key);
+          if (labelId) gZoom.select('.labels-layer').selectAll('.edge-label')
+            .filter(l => l.id === labelId).style('opacity', 1);
+        });
+        g.on('mouseleave', function() {
+          const v = d3.select(this).datum();
+          d3.select(this).classed('hovered', false);
+          gZoom.select('.edges-layer').selectAll('.g-edge').classed('branch-hovered', false);
+          const labelId = _yBranchLabel.get(v.key);
+          if (labelId && !(labelId === selectedId && selectedType === 'edge'))
+            gZoom.select('.labels-layer').selectAll('.edge-label')
+              .filter(l => l.id === labelId).style('opacity', 0);
+        });
         return g;
       },
       update => update,
       exit => exit.remove()
     )
-    // Re-bind handlers on the merged selection every tick so datum is always fresh
-    .on('click', (ev, v) => {
-      ev.stopPropagation();
-      _selectedBranchKey = v.key;
-      selectedId   = null;
-      selectedType = null;
-      // Apply branch-selected immediately — don't wait for the next sim tick
-      gZoom.select('.branch-orbs-layer').selectAll('.g-branch-orb')
-        .classed('branch-selected', d => d.key === v.key);
-      refreshSelectionClasses();
-      showBranchPanel(v, ev);
-    })
-    .on('mouseenter', function(ev, v) {
-      d3.select(this).classed('hovered', true);
-      gZoom.select('.edges-layer').selectAll('.g-edge')
-        .filter(d => v.edgeIds.includes(d.id))
-        .classed('branch-hovered', true);
-      const labelId = _yBranchLabel.get(v.key);
-      if (labelId) {
-        gZoom.select('.labels-layer').selectAll('.edge-label')
-          .filter(l => l.id === labelId).style('opacity', 1);
-      }
-    })
-    .on('mouseleave', function(ev, v) {
-      d3.select(this).classed('hovered', false);
-      gZoom.select('.edges-layer').selectAll('.g-edge')
-        .classed('branch-hovered', false);
-      const labelId = _yBranchLabel.get(v.key);
-      if (labelId && !(labelId === selectedId && selectedType === 'edge')) {
-        gZoom.select('.labels-layer').selectAll('.edge-label')
-          .filter(l => l.id === labelId).style('opacity', 0);
-      }
-    })
     .classed('branch-selected', v => v.key === _selectedBranchKey)
     .attr('transform', v => `translate(${v.stemX},${v.stemY})`);
 
@@ -1403,6 +1517,15 @@ document.addEventListener('keyup',   (e) => { if (e.key === 'Enter') _enterKeyDo
 
 let _mouseClientX = 0, _mouseClientY = 0;
 document.addEventListener('mousemove', e => { _mouseClientX = e.clientX; _mouseClientY = e.clientY; });
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'a') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+  if (document.getElementById('history-drawer')?.classList.contains('open')) return;
+  if (document.getElementById('questions-drawer')?.classList.contains('open')) return;
+  e.preventDefault();
+  toggleAttachMode();
+});
 
 document.addEventListener('keydown', async (e) => {
   if (e.key !== 'n') return;
@@ -1577,7 +1700,6 @@ export function enterAttachFrom(nodeId) {
 }
 
 export function toggleAttachMode(hideEscHint = false) {
-  if (currentState === 'FirstOutline') return;
   attachMode = !attachMode;
   document.getElementById('btn-attach').classList.toggle('active', attachMode);
   document.getElementById('graph-container').classList.toggle('attach-mode', attachMode);
@@ -1955,6 +2077,7 @@ function dragBehavior() {
       } else {
         if (floatMode) {
           d.fx = null; d.fy = null;
+          if (d.node_type === 'Subject') simulation.alpha(0.4).restart();
         }
       }
     });
@@ -2327,7 +2450,6 @@ function showBranchPanel(v, event) {
       saveSimData(); ticked();
       dropContainer.querySelectorAll('.palette-swatch').forEach(s => s.classList.toggle('active', parseInt(s.dataset.idx) === idx));
       summaryEl.style.background = swatchClr(idx);
-      detailsEl.removeAttribute('open');
     };
   });
 
@@ -2404,132 +2526,10 @@ export function showDetailPanel(type, id, event) {
     }
 
     const titleEl = content.querySelector('.editable-title');
-    titleEl.addEventListener('click', (ev) => {
-      const input = document.createElement('div');
-      input.contentEditable = 'true';
-      input.textContent = nodes[id].title;
-      input.className = 'inline-title-input';
-      titleEl.replaceWith(input);
-      // place cursor at click position rather than selecting all
-      input.focus();
-      let range;
-      if (document.caretPositionFromPoint) {
-        const pos = document.caretPositionFromPoint(ev.clientX, ev.clientY);
-        if (pos) { range = document.createRange(); range.setStart(pos.offsetNode, pos.offset); range.collapse(true); }
-      } else if (document.caretRangeFromPoint) {
-        range = document.caretRangeFromPoint(ev.clientX, ev.clientY);
-      }
-      if (range) { const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
-      let saved = false;
-      const save = async () => {
-        if (saved) return;
-        saved = true;
-        const newTitle = input.textContent.trim();
-        if (!newTitle || newTitle === nodes[id].title) { input.replaceWith(titleEl); return; }
-        const oldTitle = nodes[id].title;
-        const ok = await apiRequest('PATCH', `${API}/nodes/${id}`, { title: newTitle });
-        if (!ok) { saved = false; input.replaceWith(titleEl); return; }
-        if (currentState === 'FirstOutline') undoStack.push({ type: 'edit-node-title', id, oldTitle });
-        addHistory(`Renamed "${nodes[id].title}" → "${newTitle}"`, '✎');
-        nodes[id].title = newTitle;
-        titleEl.textContent = newTitle;
-        input.replaceWith(titleEl);
-        gZoom.select('.nodes-layer').selectAll('.g-node').each(function(d) {
-          if (d.id === id) { d.title = newTitle; d3.select(this).select('text').text(newTitle); }
-        });
-      };
-      input.addEventListener('blur', save);
-      input.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-        if (e.key === 'Escape') { saved = true; input.replaceWith(titleEl); }
-      });
-    });
 
     const bodyEl = content.querySelector('.editable-body');
     if (n.body) bodyEl.innerHTML = n.body;
-    else bodyEl.textContent = 'Click to add notes…';
-
-    bodyEl.addEventListener('click', () => {
-      const editor = document.createElement('div');
-      editor.contentEditable = 'true';
-      editor.className = 'inline-body-editor';
-      editor.spellcheck = true;
-      const existing = nodes[id].body || '';
-      editor.innerHTML = (existing && !/<[a-z][\s\S]*>/i.test(existing))
-        ? existing.replace(/\n/g, '<br>')
-        : existing;
-      bodyEl.replaceWith(editor);
-      editor.focus();
-      const range = document.createRange();
-      range.selectNodeContents(editor);
-      range.collapse(false);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-
-      const fitEditor = () => {
-        const footer = panel.querySelector('.detail-footer');
-        if (!footer || !editor.isConnected) return;
-        const editorTop = editor.getBoundingClientRect().top;
-        const footerTop = footer.getBoundingClientRect().top;
-        const available = footerTop - editorTop - 12;
-        editor.style.height = Math.max(80, available) + 'px';
-      };
-      requestAnimationFrame(fitEditor);
-      const ro = new ResizeObserver(fitEditor);
-      ro.observe(panel);
-
-      let saved = false;
-      const save = async () => {
-        if (saved) return;
-        saved = true;
-        ro.disconnect();
-        const newBody = editor.innerHTML.replace(/<br\s*\/?>/gi, '<br>').trim();
-        const clean = newBody === '<br>' ? null : (newBody || null);
-        if (clean === (nodes[id].body || null)) { editor.replaceWith(bodyEl); return; }
-        const oldBody = nodes[id].body ?? null;
-        const ok = await apiRequest('PATCH', `${API}/nodes/${id}`, { body: clean });
-        if (!ok) { saved = false; editor.replaceWith(bodyEl); return; }
-        if (currentState === 'FirstOutline') undoStack.push({ type: 'edit-node-body', id, oldBody });
-        addHistory(`Edited notes for "${nodes[id].title}"`, '✎');
-        nodes[id].body = clean;
-        if (clean) bodyEl.innerHTML = clean;
-        else bodyEl.textContent = 'Click to add notes…';
-        bodyEl.classList.toggle('detail-body-empty', !clean);
-        editor.replaceWith(bodyEl);
-      };
-
-      editor.addEventListener('blur', save);
-      editor.addEventListener('keydown', e => {
-        const mod = e.ctrlKey || e.metaKey;
-        if (mod && e.key === 'b') { e.preventDefault(); document.execCommand('bold'); return; }
-        if (mod && e.key === 'i') { e.preventDefault(); document.execCommand('italic'); return; }
-        if (mod && e.key === 'u') { e.preventDefault(); document.execCommand('underline'); return; }
-        if (e.key === 'Tab') {
-          e.preventDefault();
-          e.shiftKey ? document.execCommand('outdent') : document.execCommand('indent');
-          return;
-        }
-        if (e.key === ' ') {
-          const sel = window.getSelection();
-          if (sel.rangeCount) {
-            const r = sel.getRangeAt(0);
-            const textBefore = r.startContainer.textContent?.slice(0, r.startOffset);
-            if (textBefore === '-') {
-              e.preventDefault();
-              const del = document.createRange();
-              del.setStart(r.startContainer, r.startOffset - 1);
-              del.setEnd(r.startContainer, r.startOffset);
-              sel.removeAllRanges(); sel.addRange(del);
-              document.execCommand('delete');
-              document.execCommand('insertUnorderedList');
-              return;
-            }
-          }
-        }
-        if (e.key === 'Escape') { saved = true; editor.replaceWith(bodyEl); }
-      });
-    });
+    else bodyEl.textContent = '';
 
     content.querySelectorAll('.detail-conn-row').forEach(row => {
       if (currentState === 'FirstOutline') return;
@@ -2580,48 +2580,6 @@ export function showDetailPanel(type, id, event) {
         enterRewireMode(edgeId, field, id, id);
       });
 
-      const labelEl = row.querySelector('.detail-conn-label');
-      labelEl.addEventListener('click', (ev) => {
-        const inp = document.createElement('div');
-        inp.contentEditable = 'true'; inp.spellcheck = false;
-        inp.className = 'detail-conn-input label-input';
-        const dirW  = row.querySelector('.detail-conn-dir').offsetWidth;
-        const delW  = row.querySelector('.detail-conn-delete').offsetWidth;
-        const calcW = () => Math.max(40, (row.offsetWidth - dirW - delW - 18) / 2);
-        inp.style.width = calcW() + 'px';
-        const labelH = labelEl.offsetHeight;
-        if (labelH > 0) { inp.style.minHeight = labelH + 'px'; inp.style.whiteSpace = 'pre-wrap'; inp.style.overflowWrap = 'break-word'; }
-        inp.textContent = edges[edgeId]?.body || '';
-        if (!inp.textContent) inp.dataset.placeholder = 'label…';
-        labelEl.replaceWith(inp);
-        inp.focus();
-        const labelRo = new ResizeObserver(() => { inp.style.width = calcW() + 'px'; });
-        labelRo.observe(row);
-        let range;
-        if (document.caretPositionFromPoint) {
-          const pos = document.caretPositionFromPoint(ev.clientX, ev.clientY);
-          if (pos) { range = document.createRange(); range.setStart(pos.offsetNode, pos.offset); range.collapse(true); }
-        } else if (document.caretRangeFromPoint) {
-          range = document.caretRangeFromPoint(ev.clientX, ev.clientY);
-        }
-        if (range) { const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
-        let saved = false;
-        const save = async () => {
-          if (saved) return; saved = true;
-          const val = inp.textContent.trim() || null;
-          labelRo.disconnect();
-          if (val === (edges[edgeId]?.body || null)) { inp.replaceWith(labelEl); return; }
-          const ok = await apiRequest('PATCH', `${API}/edges/${edgeId}`, { body: val });
-          if (!ok) { saved = false; inp.replaceWith(labelEl); return; }
-          if (val) addHistory(`Labeled "${nodes[id]?.title}"–"${nodes[otherId]?.title}": "${val}"`, '✎');
-          edges[edgeId].body = val;
-          labelEl.textContent = val || 'add label…';
-          labelEl.classList.toggle('detail-conn-label-empty', !val);
-          inp.replaceWith(labelEl);
-        };
-        inp.addEventListener('blur', save);
-        inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } if (e.key === 'Escape') { labelRo.disconnect(); saved = true; inp.replaceWith(labelEl); } });
-      });
     });
 
     // Multi-line connections rows: update clamp based on available height per row
@@ -2682,7 +2640,6 @@ export function showDetailPanel(type, id, event) {
           .each(function() { Object.entries(vars).forEach(([k, v]) => d3.select(this).style(k, v)); });
         paletteEl.querySelectorAll('.palette-swatch').forEach(s => s.classList.toggle('active', parseInt(s.dataset.idx) === idx));
         summaryEl.style.background = swatchColor(idx);
-        detailsEl.removeAttribute('open');
       };
     });
 
@@ -2808,7 +2765,6 @@ export function showDetailPanel(type, id, event) {
           .style('--edge-color', edgeSwatchClr(idx));
         paletteEl.querySelectorAll('.palette-swatch').forEach(s => s.classList.toggle('active', parseInt(s.dataset.idx) === idx));
         summaryEl.style.background = edgeSwatchClr(idx);
-        detailsEl.removeAttribute('open');
       };
     });
   }

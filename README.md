@@ -12,6 +12,10 @@ A tool for building a personal knowledge graph around a subject you're studying.
 
 **LLM pipeline with structured output throughout.** `backend/llm.py` wraps all AI calls through OpenAI's structured output API (`responses.parse`), with every response typed via Pydantic models. This means the LLM can never return malformed graph data — if the response doesn't conform to the schema, the call fails loudly rather than silently corrupting graph state. Prompts are versioned and stored externally (OpenAI prompt IDs), keeping the codebase clean of long prompt strings while allowing prompt iteration without deploys.
 
+**Importance rating shapes graph density.** The questionnaire's importance slider (1–5) is passed directly to `gen_outline_from_notes` as `importance`. The LLM prompt receives `first_nodes_max = importance * 3`, so a rating of 1 yields a minimal 3-node sketch while a rating of 5 yields up to 15 nodes. The user's learning goal is also forwarded to the prompt so the LLM can weight concepts relevant to that goal. Both values are saved to `localStorage` via `versions.js` so regeneration always uses the original parameters.
+
+**Graph versioning with up to 3 LLM-generated snapshots.** After the initial graph is generated, a "Regenerate" button appears in the toolbar. Each regeneration calls `POST /graph/regenerate` (clears non-Subject nodes, runs `gen_outline_from_notes` with the same params, applies the delta), then snapshots the resulting graph state into `localStorage`. Up to 3 versions are kept; the History drawer shows them as version pills with timestamps. Clicking a pill calls `POST /graph/restore-version`, which replaces the live graph with the stored snapshot without an LLM call. The regenerate button is disabled when you're not on the latest version or have exhausted the 3-version limit.
+
 **Graph delta pattern for LLM-driven updates.** Rather than having the LLM regenerate the full graph on every update, the `update_outline` call returns a `GraphDelta` — a diff of what to add, update, and delete. This keeps LLM responses small and predictable, and means partial updates can be applied without touching unrelated nodes. The same delta schema is reused for PDF ingestion, edit suggestions, and research-driven expansions.
 
 **Reflection mode walks the graph via BFS.** The reflection feature traverses nodes in breadth-first order from the Subject outward, prompting the user to articulate each concept in their own words. The traversal order is computed in `reflection.js` rather than the backend, keeping the graph-walking logic co-located with the frontend graph state. Unreachable nodes are flagged before the session starts via a connectivity check.
@@ -22,11 +26,15 @@ A tool for building a personal knowledge graph around a subject you're studying.
 
 **Expertise levels calibrate all LLM output.** During the questionnaire, a dedicated LLM call (`infer_expertise`) reads the user's stated goal, prior knowledge, and importance rating and infers `current_expertise` and `target_expertise` on a 1–5 scale. These two numbers are stored on the user record and passed as context to every subsequent LLM call — reflection questions, research answers, graph updates — so the language and depth of generated content adapts to where the user actually is, not where they say they are.
 
-**PDF ingestion without client-side text extraction.** The questionnaire accepts a PDF upload. Rather than parsing the PDF in the browser or with a server-side library, the raw bytes are sent directly to the LLM (`extract_knowledge_from_pdf`), which returns a free-form knowledge summary. That summary then becomes the notes input for `gen_outline_from_notes`. This keeps the ingestion path identical to the manual notes path and avoids brittle PDF parsing logic.
+**PDF ingestion without client-side text extraction.** The questionnaire accepts a PDF upload. Rather than parsing the PDF in the browser or with a server-side library, the raw bytes are sent directly to the LLM (`extract_knowledge_from_pdf`), which returns a free-form knowledge summary. That summary then becomes the notes input for `gen_outline_from_notes`. This keeps the ingestion path identical to the manual notes path and avoids brittle PDF parsing logic. A "Clear PDF" button replaces the upload button once a file is loaded, so users can swap files without refreshing.
 
 **Learning state machine persists in the backend.** A `LearningState` enum (`questionnaire → graph → reflect → research`) is stored per user and exposed via `GET/POST /state`. The frontend reads this on load to determine which screen to show, so returning to the app always drops you back in the right mode rather than re-running onboarding.
 
 **Search is decoupled from the backend.** Rather than adding full-text search to SQLite, the app syncs the in-memory graph state to Algolia after every `loadData()` call via `replaceAllObjects`. This keeps the backend a simple REST API over SQLite and lets search scale and be configured independently. If Algolia credentials aren't present the app degrades silently — search just doesn't show up.
+
+**Subject node is always gravity-pinned to the top.** The D3 simulation includes `subjectY` and `subjectX` forces that continuously pull the Subject node toward `y = -10` (near the top of the boundary) and `x = graphW * 0.5`. In float mode, `_pinSubjectTop()` sets `fy = -10` directly so the subject doesn't drift when force strengths are low. This means the graph always reads top-down with the central concept anchoring the layout.
+
+**Zoom-aware rendering optimisations.** `updateVisualScales()` is now debounced through `_scheduleVisualScales()` (one rAF per zoom event instead of firing every scroll pixel). Branch orb circles are scaled by `3.5 / currentK` so they stay visually constant size at any zoom level. Label culling is throttled to ~12 fps to avoid competing with the 60 fps simulation loop.
 
 **Vite with a non-root `frontend/` directory.** The project root holds both the backend and frontend. Setting `root: 'frontend'` in Vite means `envDir` defaults to `frontend/` rather than the project root — a subtle gotcha that required an explicit `envDir: '..'` override so `.env.local` at the repo root is actually loaded. The Algolia ESM browser build also required a resolve alias since Vite can't bundle Algolia's Node CJS build for the browser.
 
@@ -40,6 +48,7 @@ A tool for building a personal knowledge graph around a subject you're studying.
 learning-accelerator/
 ├── backend/
 │   ├── api.py          # FastAPI routes (REST: /nodes, /edges, /graph, /reflection, /questions)
+│   │                   #   includes /graph/regenerate and /graph/restore-version
 │   ├── service.py      # Business logic & invariant enforcement
 │   ├── database.py     # SQLite via contextlib; raw SQL, no ORM
 │   ├── llm.py          # All LLM calls — structured output via OpenAI responses.parse
@@ -59,7 +68,8 @@ learning-accelerator/
 │   │   ├── questions.js        # Question list, routing to research explorer
 │   │   ├── ideaTable.js        # Idea table drawer (tabular view of nodes)
 │   │   ├── search.js           # Algolia-powered search UI
-│   │   └── history.js          # localStorage edit history
+│   │   ├── history.js          # localStorage edit history + graph version drawer UI
+│   │   └── versions.js         # Graph version snapshots (localStorage), regenerate, restore
 │   └── styles/
 │       ├── base.css            # Layout, landing, table, modals
 │       └── graph.css           # SVG graph styles, detail panel
