@@ -1,3 +1,5 @@
+import { getVersions, getCurrentIdx, restoreVersion, canRegenerate, MAX_VERSIONS } from './versions.js';
+
 const HISTORY_KEY = 'editHistory';
 const MAX = 30;
 
@@ -39,13 +41,58 @@ function _render() {
   `).join('');
 }
 
+export function renderVersionHistory() {
+  const section = document.getElementById('graph-versions-section');
+  if (!section) return;
+  const versions = getVersions();
+  if (!versions.length) { section.style.display = 'none'; return; }
+  section.style.display = '';
+  const currentIdx = getCurrentIdx();
+  const can = canRegenerate();
+
+  section.querySelector('.graph-versions-header').textContent =
+    `Graph Versions (${versions.length}/${MAX_VERSIONS})`;
+
+  const list = section.querySelector('.graph-versions-list');
+  list.innerHTML = versions.map((v, i) => {
+    const isActive  = i === currentIdx;
+    const label     = i === 0 ? 'latest' : (i === versions.length - 1 ? 'original' : `v${versions.length - i}`);
+    const date      = new Date(v.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `<button class="version-pill${isActive ? ' active' : ''}" data-idx="${i}">
+      <span class="version-pill-label">Version ${versions.length - i} <span class="version-pill-tag">${label}</span></span>
+      <span class="version-pill-time">${date}</span>
+    </button>`;
+  }).join('');
+
+  list.querySelectorAll('.version-pill').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.idx, 10);
+      if (idx === currentIdx) return;
+      btn.disabled = true;
+      await restoreVersion(idx);
+      renderVersionHistory();
+      // update regenerate button if visible
+      const { updateRegenerateBtn } = await import('./versions.js');
+      updateRegenerateBtn();
+    });
+  });
+
+  // remaining-attempts hint
+  let hint = section.querySelector('.versions-hint');
+  if (!hint) { hint = document.createElement('p'); hint.className = 'versions-hint'; section.appendChild(hint); }
+  const remaining = MAX_VERSIONS - versions.length;
+  hint.textContent = can
+    ? `${remaining} regeneration${remaining !== 1 ? 's' : ''} remaining`
+    : (versions.length >= MAX_VERSIONS ? 'No regenerations remaining' : 'Navigate to latest to regenerate');
+}
+
 export function toggleHistoryDrawer() {
   const drawer  = document.getElementById('history-drawer');
   const overlay = document.getElementById('history-overlay');
   const opening = !drawer.classList.contains('open');
   drawer.classList.toggle('open', opening);
   overlay.classList.toggle('open', opening);
-  if (opening) _render();
+  if (opening) { _render(); renderVersionHistory(); }
 }
 
 export function clearHistory() {

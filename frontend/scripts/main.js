@@ -1,12 +1,13 @@
 import { initAlgolia, API, nodes, loadData, setAppState } from './api.js';
 import { initGraph, cheeseMode } from './graph.js';
-import { initHistoryDrawer, toggleHistoryDrawer } from './history.js';
+import { initHistoryDrawer, toggleHistoryDrawer, renderVersionHistory } from './history.js';
 import { initLanding } from './landing.js';
 import { FIRST_OUTLINE_TOUR } from './questionnaire.js';
 import { showInfo, showTour } from './ui.js';
 import { initQuestionsDrawer, toggleQuestionsDrawer } from './questions.js';
 import { toggleIdeaTableDrawer } from './ideaTable.js';
 import { initReflection, devSkipToFinalize } from './reflection.js';
+import { regenerate, updateRegenerateBtn, getVersions } from './versions.js';
 window.devSkipToFinalize = devSkipToFinalize;
 import './search.js';
 
@@ -23,6 +24,22 @@ window.toggleIdeaTableDrawer = toggleIdeaTableDrawer;
 window.showInfo = showInfo;
 window.showTour = showTour;
 window.FIRST_OUTLINE_TOUR = FIRST_OUTLINE_TOUR;
+
+window.triggerRegenerate = async () => {
+  const btn = document.getElementById('btn-regenerate');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = '↺ Regenerating…';
+  const ok = await regenerate();
+  if (ok) {
+    renderVersionHistory();
+  }
+  updateRegenerateBtn();
+  btn.textContent = '↺ Regenerate';
+};
+
+// Initialise button state on load (handles page refresh while in FirstOutline)
+if (getVersions().length > 0) updateRegenerateBtn();
 // ---- Dev helpers ----
 
 const _devPost = (path, body) => fetch(`${API}${path}`, {

@@ -5,7 +5,7 @@ from service import MAX_TITLE_LEN, MAX_NODE_BODY_LEN, MAX_EDGE_BODY_LEN
 client = OpenAI()
 
 OUTLINE_PROMPT_ID      = "pmpt_69af450f361c8190880fa9272ac5ccf600925a7d521ffdd8"
-OUTLINE_PROMPT_VERSION = "8"
+OUTLINE_PROMPT_VERSION = "11"
 
 EXPERTISE_PROMPT_ID      = "pmpt_69b8a3c16f0481969f48ea668d6d03ea0abcd79917460735"
 EXPERTISE_PROMPT_VERSION = "1"
@@ -26,7 +26,6 @@ UPDATE_OUTLINE_PROMPT_ID      = "pmpt_69b8e5dc35e88194815c1db20d2042e208a784831b
 UPDATE_OUTLINE_PROMPT_VERSION = "1"
 
 FIRST_NODES_MIN = 1
-FIRST_NODES_MAX = 15
 
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
@@ -96,10 +95,11 @@ class GraphDelta(BaseModel):
 
 # ── LLM calls ─────────────────────────────────────────────────────────────────
 
-def gen_outline_from_notes(subject: str, notes: str) -> CreateNewGraph:
+def gen_outline_from_notes(subject: str, notes: str, goal: str = "", importance: int = 5) -> CreateNewGraph:
     """
-    Generate an initial graph outline from a subject title and the user's
-    questionnaire notes. Returns a CreateNewGraph with nodes and connections.
+    Generate an initial graph outline from a subject title, the user's
+    questionnaire notes, and their learning goal. Returns a CreateNewGraph
+    with nodes and connections.
     """
     response = client.responses.parse(
         prompt={
@@ -110,9 +110,10 @@ def gen_outline_from_notes(subject: str, notes: str) -> CreateNewGraph:
                 "max_node_body_len": str(MAX_NODE_BODY_LEN),
                 "max_edge_body_len": str(MAX_EDGE_BODY_LEN),
                 "first_nodes_min":   str(FIRST_NODES_MIN),
-                "first_nodes_max":   str(FIRST_NODES_MAX),
+                "first_nodes_max":   str(importance * 3),
                 "subject":           subject,
                 "notes":             notes,
+                "goal":              goal or "(not provided)",
             },
         },
         text_format=CreateNewGraph,

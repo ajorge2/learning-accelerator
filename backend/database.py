@@ -268,6 +268,25 @@ def clear_graph(user_id: str):
         conn.execute("DELETE FROM nodes WHERE node_type != 'Subject' AND user_id=?", (user_id,))
 
 
+def restore_graph_version(user_id: str, nodes: list[dict], edges: list[dict]):
+    """Replaces all non-subject nodes/edges with the given snapshot (preserving original IDs)."""
+    with _db() as conn:
+        conn.execute("DELETE FROM edges WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM nodes WHERE node_type != 'Subject' AND user_id=?", (user_id,))
+        for n in nodes:
+            conn.execute(
+                "INSERT OR IGNORE INTO nodes (node_id, user_id, title, body, node_type) VALUES (?,?,?,?,?)",
+                (n["id"], user_id, n["title"], n.get("body"), n.get("node_type", "Normal")),
+            )
+        for e in edges:
+            conn.execute(
+                "INSERT OR IGNORE INTO edges (edge_id, user_id, body, node_a_id, node_b_id, bidirectional, source_id)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (e["id"], user_id, e.get("body"), e["node_a_id"], e["node_b_id"],
+                 int(e.get("bidirectional", True)), e.get("source_id")),
+            )
+
+
 def reset_graph(user_id: str):
     with _db() as conn:
         conn.execute("DELETE FROM questions WHERE user_id=?", (user_id,))

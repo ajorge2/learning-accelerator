@@ -34,6 +34,7 @@
     <div id="graph-toolbar">
       <div class="toolbar-left">
         <button id="btn-attach" class="btn btn-ghost btn-sm" onclick="toggleAttachMode()">⊕ Attach</button>
+        <button id="btn-regenerate" class="btn btn-ghost btn-sm" style="display:none;" onclick="triggerRegenerate()">↺ Regenerate</button>
         <button id="btn-lasso-type" class="btn btn-ghost btn-sm" onclick="openLassoFilter()">Lasso Type</button>
         <div id="lasso-filter" class="lasso-filter">
           <button type="button" class="btn btn-ghost btn-sm lasso-filter-close" onclick="closeLassoFilter()">×</button>
@@ -264,6 +265,10 @@
     <h3>Recent Edits</h3>
     <button class="history-close" onclick="toggleHistoryDrawer()">×</button>
   </div>
+  <div id="graph-versions-section" style="display:none;">
+    <div class="graph-versions-header"></div>
+    <div class="graph-versions-list"></div>
+  </div>
   <ul id="history-list"></ul>
 </div>
 
@@ -358,6 +363,7 @@
         <label class="q-label">
           Outline what you know:
           <button type="button" id="btn-upload-pdf" class="q-pdf-btn">Upload PDF</button>
+          <button type="button" id="btn-clear-pdf" class="q-pdf-clear-btn" style="display:none">✕ Clear PDF</button>
           <input type="file" id="q-pdf-input" accept=".pdf" style="display:none">
         </label>
         <textarea id="q-knowledge" class="q-textarea" rows="4" placeholder="Jot down anything you already understand about this subject…" autocomplete="off" spellcheck="false"></textarea>
@@ -385,7 +391,7 @@
 
     <button id="btn-new-subject-toggle" class="btn-landing-ghost" style="display:none;">Start with a new subject</button>
 
-    <div id="new-subject-form" style="display:none;">
+    <div id="new-subject-form">
       <input id="subject-input" type="text" placeholder="e.g. Linear Algebra" autocomplete="off" spellcheck="false" />
       <button id="btn-create-subject" class="btn-landing-primary">New Subject</button>
       <p id="landing-error" class="landing-error"></p>

@@ -44,7 +44,7 @@ export async function initLanding() {
   });
 
   document.getElementById('btn-new-subject-toggle').addEventListener('click', () => {
-    document.getElementById('new-subject-form').style.display = '';
+    document.getElementById('new-subject-form').classList.add('visible');
     document.getElementById('subject-input').focus();
   });
 
