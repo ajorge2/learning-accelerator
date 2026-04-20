@@ -5,6 +5,8 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import os
+import requests
 import database as db
 from service import GraphService, UserState, LearningState, ExpertiseService
 import llm as llm_service
@@ -562,3 +564,28 @@ def infer_expertise(req: InferExpertiseRequest):
         db.DEFAULT_USER_ID, req.subject, req.goal, req.knowledge, req.importance
     )
     return result
+
+
+# --- Algolia ---
+
+class AlgoliaSyncRequest(BaseModel):
+    records: list
+
+@app.post("/algolia/sync")
+def algolia_sync(req: AlgoliaSyncRequest):
+    app_id   = os.environ.get("ALGOLIA_APP_ID")
+    write_key = os.environ.get("ALGOLIA_WRITE_KEY")
+    index    = os.environ.get("ALGOLIA_INDEX_NAME", "learning_accelerator")
+    if not app_id or not write_key:
+        raise HTTPException(status_code=503, detail="Algolia not configured")
+    url = f"https://{app_id}-dsn.algolia.net/1/indexes/{index}/batch"
+    payload = {"requests": [{"action": "updateObject", "body": r} for r in req.records]}
+    headers = {
+        "X-Algolia-Application-Id": app_id,
+        "X-Algolia-API-Key": write_key,
+        "Content-Type": "application/json",
+    }
+    resp = requests.post(url, json=payload, headers=headers)
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=502, detail="Algolia sync failed")
+    return {"ok": True}
