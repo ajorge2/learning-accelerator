@@ -42,20 +42,13 @@ export function setAppState(state) {
 
 const ALGOLIA_INDEX_NAME = 'learning_accelerator';
 
-let _algoliaWriteIdx  = null;
 let _algoliaSearchIdx = null;
 
 export function initAlgolia() {
   const appId     = import.meta.env.VITE_ALGOLIA_APP_ID;
-  const writeKey  = import.meta.env.VITE_ALGOLIA_WRITE_KEY;
   const searchKey = import.meta.env.VITE_ALGOLIA_SEARCH_KEY;
-  if (!writeKey || writeKey.startsWith('YOUR_')) return;
-  _algoliaWriteIdx  = algoliasearch(appId, writeKey).initIndex(ALGOLIA_INDEX_NAME);
+  if (!appId || !searchKey || searchKey.startsWith('YOUR_')) return;
   _algoliaSearchIdx = algoliasearch(appId, searchKey).initIndex(ALGOLIA_INDEX_NAME);
-  _algoliaWriteIdx.setSettings({
-    searchableAttributes: ['title', 'body', 'nodeATitle', 'nodeBTitle'],
-    attributesForFaceting: ['type'],
-  }).catch(() => {});
 }
 
 export function getAlgoliaSearchIdx() {
@@ -63,7 +56,6 @@ export function getAlgoliaSearchIdx() {
 }
 
 export async function syncAlgolia() {
-  if (!_algoliaWriteIdx) return;
   const records = [
     ...Object.values(nodes).map(n => ({
       objectID:  `node_${n.id}`,
@@ -84,7 +76,11 @@ export async function syncAlgolia() {
     })),
   ];
   try {
-    await _algoliaWriteIdx.replaceAllObjects(records);
+    await fetch(`${API}/algolia/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ records }),
+    });
   } catch (err) {
     console.error('Algolia sync failed:', err);
   }
