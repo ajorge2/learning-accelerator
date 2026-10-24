@@ -1,0 +1,9 @@
+{
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "https://github.com/ajorge2/learning-accelerator",
+      "permanent": false
+    }
+  ]
+}

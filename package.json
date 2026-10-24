@@ -18,11 +18,9 @@
     "vite": "^7.3.1"
   },
   "dependencies": {
-    "algoliasearch": "^4.27.0",
     "d3": "^7.9.0",
     "daisyui": "^5.5.19",
     "dompurify": "^3.4.17",
-    "openai": "^6.27.0",
     "tailwindcss": "^4.2.1"
   }
 }
