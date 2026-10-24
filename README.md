@@ -14,7 +14,7 @@ A tool for building a personal knowledge graph around a subject you're studying.
 
 **Importance rating shapes graph density.** The questionnaire's importance slider (1–5) is passed directly to `gen_outline_from_notes` as `importance`. The LLM prompt receives `first_nodes_max = importance * 3`, so a rating of 1 yields a minimal 3-node sketch while a rating of 5 yields up to 15 nodes. The user's learning goal is also forwarded to the prompt so the LLM can weight concepts relevant to that goal. Both values are saved to `localStorage` via `versions.js` so regeneration always uses the original parameters.
 
-**Graph versioning with up to 3 LLM-generated snapshots.** After the initial graph is generated, a "Regenerate" button appears in the toolbar. Each regeneration calls `POST /graph/regenerate` (clears non-Subject nodes, runs `gen_outline_from_notes` with the same params, applies the delta), then snapshots the resulting graph state into `localStorage`. Up to 3 versions are kept; the History drawer shows them as version pills with timestamps. Clicking a pill calls `POST /graph/restore-version`, which replaces the live graph with the stored snapshot without an LLM call. The regenerate button is disabled when you're not on the latest version or have exhausted the 3-version limit.
+**Graph versioning with up to 3 LLM-generated snapshots.** After the initial graph is generated, a "Regenerate" button appears in the toolbar. Each regeneration calls `POST /graph/regenerate` (clears non-Subject nodes, runs `gen_outline_from_notes` with the same params, applies the delta), then snapshots the resulting graph state into `sessionStorage`. Up to 3 versions are kept; the History drawer shows them as version pills with timestamps. Clicking a pill calls `POST /graph/restore-version`, which replaces the live graph with the stored snapshot without an LLM call. The regenerate button is disabled when you're not on the latest version or have exhausted the 3-version limit.
 
 **Graph delta pattern for LLM-driven updates.** Rather than having the LLM regenerate the full graph on every update, the `update_outline` call returns a `GraphDelta` — a diff of what to add, update, and delete. This keeps LLM responses small and predictable, and means partial updates can be applied without touching unrelated nodes. The same delta schema is reused for PDF ingestion, edit suggestions, and research-driven expansions.
 
@@ -116,7 +116,7 @@ Create `.env.local` in the project root:
 OPENAI_API_KEY=your_openai_key          # required — used by the backend for all LLM calls
 
 VITE_ALGOLIA_APP_ID=your_app_id         # optional — search degrades silently if absent
-VITE_ALGOLIA_WRITE_KEY=your_write_api_key
+ALGOLIA_WRITE_KEY=server_side_only_do_not_prefix_with_VITE
 VITE_ALGOLIA_SEARCH_KEY=your_search_only_key
 ```
 
@@ -126,3 +126,19 @@ VITE_ALGOLIA_SEARCH_KEY=your_search_only_key
 cd backend
 python seed.py   # requires backend to be running; populates a sample learning-science graph
 ```
+
+## Privacy defaults
+
+Browser requests use a cryptographically random session secret held in sessionStorage. Each session has a separate temporary SQLite database; another session cannot read or mutate it. Temporary files expire on the next request after one hour of inactivity. Closing a tab loses the session secret; it does not immediately erase server files. Shared Algolia indexing is disabled. Existing pre-audit `backend/graph.db` files are not exposed by the session middleware and are not deleted automatically. Operators must review and remove their own legacy data/backups.
+
+AI features transmit submitted notes, questions, and PDF bytes to OpenAI. Responses explicitly set `store=False`; provider abuse-monitoring and other retention policies still apply. Never put a write/admin key in a Vite-prefixed variable. The implementation is a single-process demo; deploy one worker or replace the session store before scaling.
+
+## Research citation
+
+Hidi, S., & Renninger, K. A. (2006). *The Four-Phase Model of Interest Development*. Educational Psychologist, 41(2), 111–127. https://doi.org/10.1207/s15326985ep4102_4. The third-party paper is no longer redistributed in this repository.
+
+Browser HTML from users/models is sanitized before insertion, and citation navigation accepts HTTP(S) only. Older browser localStorage and pre-audit shared Algolia records are not automatically erased; operators/users must review their legacy copies.
+
+## Privacy and licensing
+
+See [PRIVACY.md](PRIVACY.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The software license does not relicense third-party data or publications.

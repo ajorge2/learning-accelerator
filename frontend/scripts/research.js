@@ -1,3 +1,4 @@
+import {sanitizeHtml} from './safeHtml.js';
 import { API, nodes, edges, loadData, setAppState } from './api.js';
 import { showConfirm } from './ui.js';
 import { addHistory } from './history.js';
@@ -23,10 +24,10 @@ function _refreshNotesList() {
   const list = document.getElementById('rnp-notes-list');
   const items = [...document.querySelectorAll('.research-question-item')];
   if (!items.length) {
-    list.innerHTML = '<li class="rnp-placeholder">No questions yet.</li>';
+    list.innerHTML = sanitizeHtml('<li class="rnp-placeholder">No questions yet.</li>');
     return;
   }
-  list.innerHTML = items.map(item => {
+  list.innerHTML = sanitizeHtml(items.map(item => {
     const qText = item.querySelector('.research-question-text').textContent;
     const meta  = item.querySelector('.research-question-meta').textContent;
     const note  = item._note?.trim() ?? '';
@@ -39,7 +40,7 @@ function _refreshNotesList() {
       <div class="rnp-q-meta">${_esc(meta)}</div>
       ${noteHtml}
     </li>`;
-  }).join('');
+  }).join(''));
 
   list.querySelectorAll('.rnp-item').forEach(li => {
     li.addEventListener('click', () => {
@@ -68,26 +69,26 @@ function _targetTitle(q) {
 
 async function _loadQuestions() {
   const list = document.getElementById('research-questions-list');
-  list.innerHTML = '<li class="research-q-placeholder">Loading questions…</li>';
+  list.innerHTML = sanitizeHtml('<li class="research-q-placeholder">Loading questions…</li>');
 
   let questions = [];
   try {
     const res = await fetch(`${API}/questions`);
     questions = await res.json();
   } catch {
-    list.innerHTML = '<li class="research-q-placeholder" style="color:#f87171">Failed to load questions.</li>';
+    list.innerHTML = sanitizeHtml('<li class="research-q-placeholder" style="color:#f87171">Failed to load questions.</li>');
     return;
   }
 
   if (!questions.length) {
-    list.innerHTML = '<li class="research-q-placeholder">No questions to explore.</li>';
+    list.innerHTML = sanitizeHtml('<li class="research-q-placeholder">No questions to explore.</li>');
     return;
   }
 
   // Pre-populate cache from stored answers
   questions.forEach(q => { if (q.answer) q._cached = { answer: q.answer, citations: q.citations }; });
 
-  list.innerHTML = questions.map(q => `
+  list.innerHTML = sanitizeHtml(questions.map(q => `
     <li class="research-question-item" data-id="${q.id}">
       <div class="research-question-header">
         <div class="research-question-left">
@@ -104,7 +105,7 @@ async function _loadQuestions() {
         </div>
       </div>
     </li>
-  `).join('');
+  `).join(''));
 
   list.querySelectorAll('.research-question-item').forEach(item => {
     const q = questions.find(q => q.id === item.dataset.id);
@@ -158,7 +159,7 @@ function _openAnswerPanel(questionText, cached) {
   if (cached) {
     _renderAnswerInPanel(body, cached);
   } else {
-    body.innerHTML = '<div class="rap-loading">Exploring…</div>';
+    body.innerHTML = sanitizeHtml('<div class="rap-loading">Exploring…</div>');
   }
   // Load saved note for this question
   document.getElementById('rap-notes-input').value = _activeItem?._note ?? '';
@@ -200,7 +201,7 @@ function _renderAnswerInPanel(body, data) {
     answerHtml = _esc(text);
   }
 
-  body.innerHTML = `<div class="rap-answer-text">${answerHtml}</div>`;
+  body.innerHTML = sanitizeHtml(`<div class="rap-answer-text">${answerHtml}</div>`);
 
   body.querySelectorAll('.rap-cite-link').forEach(el => {
     el.addEventListener('click', () => {
@@ -215,7 +216,7 @@ function _showCitationModal(citation) {
   document.getElementById('citation-modal-title').textContent = `Open Link To "${name}"?`;
   document.getElementById('citation-modal-url').textContent = citation.url;
   document.getElementById('citation-modal-open').onclick = () => {
-    window.open(citation.url, '_blank', 'noopener');
+    try { const url = new URL(citation.url); if (['https:', 'http:'].includes(url.protocol)) window.open(url.href, '_blank', 'noopener,noreferrer'); } catch {}
     _closeCitationModal();
   };
   document.getElementById('citation-modal-cancel').onclick = _closeCitationModal;
@@ -255,7 +256,7 @@ async function _explore(item, force = false) {
     const res = await fetch(url, { method: 'POST' });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      body.innerHTML = `<div class="rap-error">${err.detail ?? 'Failed to get answer.'}</div>`;
+      body.innerHTML = sanitizeHtml(`<div class="rap-error">${err.detail ?? 'Failed to get answer.'}</div>`);
       return;
     }
     const data = await res.json();
@@ -264,7 +265,7 @@ async function _explore(item, force = false) {
     _renderAnswerInPanel(body, data);
     addHistory(`Explored: "${questionText}"`, '◎');
   } catch {
-    body.innerHTML = '<div class="rap-error">Failed to get answer.</div>';
+    body.innerHTML = sanitizeHtml('<div class="rap-error">Failed to get answer.</div>');
   } finally {
     delete item.dataset.exploring;
   }

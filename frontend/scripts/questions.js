@@ -1,3 +1,4 @@
+import {sanitizeHtml} from './safeHtml.js';
 import { API, nodes, edges } from './api.js';
 import { setReturnToQuestions } from './graph.js';
 import { showResearch } from './research.js';
@@ -23,28 +24,28 @@ async function _render() {
   const list = document.getElementById('questions-list');
   if (!list) return;
 
-  list.innerHTML = '<li class="questions-loading">Loading…</li>';
+  list.innerHTML = sanitizeHtml('<li class="questions-loading">Loading…</li>');
 
   let questions = [];
   try {
     const res = await fetch(`${API}/questions`);
     questions = await res.json();
   } catch {
-    list.innerHTML = '<li class="questions-empty">Failed to load.</li>';
+    list.innerHTML = sanitizeHtml('<li class="questions-empty">Failed to load.</li>');
     return;
   }
 
   if (!questions.length) {
-    list.innerHTML = '<li class="questions-empty">No questions yet</li>';
+    list.innerHTML = sanitizeHtml('<li class="questions-empty">No questions yet</li>');
     return;
   }
 
-  list.innerHTML = questions.map(q => `
+  list.innerHTML = sanitizeHtml(questions.map(q => `
     <li class="questions-item" data-id="${q.id}" data-target-id="${q.target_id}" data-target-type="${q.target_type}" style="cursor:pointer;">
       <span class="questions-text">${q.text}</span>
       <span class="questions-target">On: ${_targetTitle(q)}</span>
     </li>
-  `).join('');
+  `).join(''));
 
   list.querySelectorAll('.questions-item').forEach(item => {
     item.addEventListener('click', () => {

@@ -1,3 +1,4 @@
+import {sanitizeHtml} from './safeHtml.js';
 import { nodes, edges, API, loadData } from './api.js';
 import { showConfirm } from './ui.js';
 import { showToast, focusNodeOnly, deselectAll } from './graph.js';
@@ -56,14 +57,14 @@ export function computeReflectionOrder() {
 
 let _order     = [];
 let _idx       = 0;
-let _answers   = JSON.parse(localStorage.getItem('reflection_answers')   || '{}'); // nodeId → string[]
-let _questions = JSON.parse(localStorage.getItem('reflection_questions') || '{}'); // nodeId → string[]
+let _answers   = JSON.parse(sessionStorage.getItem('reflection_answers')   || '{}'); // nodeId → string[]
+let _questions = JSON.parse(sessionStorage.getItem('reflection_questions') || '{}'); // nodeId → string[]
 let _finalizeMode    = false;
 let _storedPatch     = null;
 let _storedAddNodes  = null; // filtered add_nodes (duplicates removed)
 
-function _persistAnswers()   { localStorage.setItem('reflection_answers',   JSON.stringify(_answers));   }
-function _persistQuestions() { localStorage.setItem('reflection_questions', JSON.stringify(_questions)); }
+function _persistAnswers()   { sessionStorage.setItem('reflection_answers',   JSON.stringify(_answers));   }
+function _persistQuestions() { sessionStorage.setItem('reflection_questions', JSON.stringify(_questions)); }
 
 // ---- Panel content ----
 
@@ -100,7 +101,7 @@ async function _renderStep(idx) {
       }).join('')
     : '<div class="rp-no-neighbors">No connections</div>';
 
-  content.innerHTML = `
+  content.innerHTML = sanitizeHtml(`
     ${node?.node_type === 'Subject' ? '<span class="detail-subject-badge" style="margin-bottom:8px;">Subject</span>' : ''}
     <h3 class="rp-node-title">${node?.title ?? nodeId}</h3>
     <div class="rp-neighbors-section">
@@ -108,7 +109,7 @@ async function _renderStep(idx) {
       <div class="rp-neighbors-list">${neighborRows}</div>
     </div>
     <div class="rp-questions-loading">Generating questions…</div>
-  `;
+  `);
 
   // Position panel on first show
   if (!panel.dataset.positioned) {
@@ -151,7 +152,7 @@ async function _renderStep(idx) {
   content.querySelector('.rp-questions-loading')?.remove();
   const qSection = document.createElement('div');
   qSection.className = 'rp-questions-section';
-  qSection.innerHTML = questionsHTML;
+  qSection.innerHTML = sanitizeHtml(questionsHTML);
   content.appendChild(qSection);
 
   nextBtn.disabled = false;
@@ -195,7 +196,7 @@ async function _startFinalize() {
   nextBtn.textContent  = 'Analyzing…';
   nextBtn.onclick      = null;
 
-  content.innerHTML = '<div class="rp-questions-loading">Analyzing your answers…</div>';
+  content.innerHTML = sanitizeHtml('<div class="rp-questions-loading">Analyzing your answers…</div>');
 
   // Build qa_by_node from all saved answers+questions
   const qaByNode = _order
@@ -263,7 +264,7 @@ function _renderChecklist(patch) {
   progress.textContent = 'Review changes';
 
   if (items.length === 0) {
-    content.innerHTML = '<div class="rp-placeholder" style="margin-top:12px;">No changes suggested.</div>';
+    content.innerHTML = sanitizeHtml('<div class="rp-placeholder" style="margin-top:12px;">No changes suggested.</div>');
     nextBtn.textContent = 'Done';
     nextBtn.disabled    = false;
     nextBtn.onclick     = () => { _closePanel(); showToast('Reflection complete!'); };
@@ -278,7 +279,7 @@ function _renderChecklist(patch) {
     </label>
   `).join('');
 
-  content.innerHTML = `
+  content.innerHTML = sanitizeHtml(`
     <div class="rp-review-section">
       <div class="rp-review-header">
         <span class="rp-suggestions-label">Suggested changes</span>
@@ -286,7 +287,7 @@ function _renderChecklist(patch) {
       </div>
       ${checklistHTML}
     </div>
-  `;
+  `);
 
   document.getElementById('rp-check-all').addEventListener('change', e => {
     document.querySelectorAll('.rp-review-check').forEach(cb => cb.checked = e.target.checked);

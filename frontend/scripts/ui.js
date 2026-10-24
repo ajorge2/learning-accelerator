@@ -1,3 +1,4 @@
+import {sanitizeHtml} from './safeHtml.js';
 import { nodes, edges, loadData, apiRequest, confirmDelete, API, currentState, undoStack } from './api.js';
 import { attachMode, toggleAttachMode } from './graph.js';
 import { addHistory } from './history.js';
@@ -73,7 +74,7 @@ document.getElementById('confirm-overlay').addEventListener('click', e => {
 
 export function openModal(title, bodyHTML, onSubmit) {
   document.getElementById('modal-title').textContent = title;
-  document.getElementById('modal-body').innerHTML = bodyHTML;
+  document.getElementById('modal-body').innerHTML = sanitizeHtml(bodyHTML);
   document.getElementById('modal-error').textContent = '';
   document.getElementById('modal-submit').onclick = onSubmit;
   document.getElementById('modal-overlay').classList.add('open');
@@ -97,28 +98,28 @@ export function renderNodes() {
   const tbody = document.getElementById('nodes-body');
   const list = Object.values(nodes);
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="2" class="empty">No ideas yet!</td></tr>';
+    tbody.innerHTML = sanitizeHtml('<tr><td colspan="2" class="empty">No ideas yet!</td></tr>');
     return;
   }
-  tbody.innerHTML = list.map(n => {
+  tbody.innerHTML = sanitizeHtml(list.map(n => {
     return `<tr>
       <td>${n.title}</td>
       <td class="cell-actions">
-        <button class="btn-edit" onclick="selectNodeById('${n.id}')">View</button>
-        <button class="btn-delete" onclick="deleteNode('${n.id}')">Delete</button>
+        <button class="btn-edit" data-ui-action="selectNodeById" data-ui-id="${n.id}">View</button>
+        <button class="btn-delete" data-ui-action="deleteNode" data-ui-id="${n.id}">Delete</button>
       </td>
     </tr>`;
-  }).join('');
+  }).join(''));
 }
 
 export function renderEdges() {
   const tbody = document.getElementById('edges-body');
   const list = Object.values(edges);
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty">No connections yet!</td></tr>';
+    tbody.innerHTML = sanitizeHtml('<tr><td colspan="4" class="empty">No connections yet!</td></tr>');
     return;
   }
-  tbody.innerHTML = list.map(e => {
+  tbody.innerHTML = sanitizeHtml(list.map(e => {
     const aTitle = nodes[e.node_a_id]?.title ?? e.node_a_id;
     const bTitle = nodes[e.node_b_id]?.title ?? e.node_b_id;
     const typeBadge = e.bidirectional
@@ -130,11 +131,11 @@ export function renderEdges() {
       <td>${typeBadge}</td>
       <td>${source}</td>
       <td class="cell-actions">
-        <button class="btn-edit" onclick="selectEdgeById('${e.id}')">View</button>
-        <button class="btn-delete" onclick="deleteEdge('${e.id}')">Delete</button>
+        <button class="btn-edit" data-ui-action="selectEdgeById" data-ui-id="${e.id}">View</button>
+        <button class="btn-delete" data-ui-action="deleteEdge" data-ui-id="${e.id}">Delete</button>
       </td>
     </tr>`;
-  }).join('');
+  }).join(''));
 }
 
 // ---- Node forms ----
@@ -198,7 +199,7 @@ export function updateConnectSourceOpts(prefix, nodeBId, getNodeBTitle) {
   const sourceEl = document.getElementById(`${prefix}-source`);
   const bTitle = getNodeBTitle(nodeBId);
   const bOpt = nodeBId && bTitle ? `<option value="${nodeBId}">${bTitle}</option>` : '';
-  sourceEl.innerHTML = sourceEl.querySelector('option[data-self]')?.outerHTML + bOpt;
+  sourceEl.innerHTML = sanitizeHtml(sourceEl.querySelector('option[data-self]')?.outerHTML + bOpt);
 }
 
 // ---- Node CRUD ----
@@ -266,7 +267,7 @@ export function edgeFormHTML(edge = null) {
     </div>
     <div class="form-group">
       <label>Idea A</label>
-      <select id="f-node-a" onchange="handleNodeSelect(this)" data-prev="${edge?.node_a_id ?? ''}">
+      <select id="f-node-a" data-ui-change="handleNodeSelect" data-prev="${edge?.node_a_id ?? ''}">
         <option value="" disabled ${edge ? '' : 'selected'}>Select an idea...</option>
         ${nodeOptions(edge?.node_a_id)}
         <option value="__new__">+ Create new idea</option>
@@ -274,7 +275,7 @@ export function edgeFormHTML(edge = null) {
     </div>
     <div class="form-group">
       <label>Idea B</label>
-      <select id="f-node-b" onchange="handleNodeSelect(this)" data-prev="${edge?.node_b_id ?? ''}">
+      <select id="f-node-b" data-ui-change="handleNodeSelect" data-prev="${edge?.node_b_id ?? ''}">
         <option value="" disabled ${edge ? '' : 'selected'}>Select an idea...</option>
         ${nodeOptions(edge?.node_b_id)}
         <option value="__new__">+ Create new idea</option>
@@ -282,7 +283,7 @@ export function edgeFormHTML(edge = null) {
     </div>
     <div class="form-group">
       <div class="form-check">
-        <input type="checkbox" id="f-bidirectional" ${directed ? '' : 'checked'} onchange="toggleSourceField()" />
+        <input type="checkbox" id="f-bidirectional" ${directed ? '' : 'checked'} data-ui-change="toggleSourceField" />
         <label for="f-bidirectional">Bidirectional</label>
       </div>
     </div>
@@ -304,7 +305,7 @@ export function updateSourceOptions() {
   const node_a_id = document.getElementById('f-node-a').value;
   const node_b_id = document.getElementById('f-node-b').value;
   const current = document.getElementById('f-source')?.value;
-  document.getElementById('f-source').innerHTML = pairOptions(node_a_id, node_b_id, current);
+  document.getElementById('f-source').innerHTML = sanitizeHtml(pairOptions(node_a_id, node_b_id, current));
 }
 
 export function toggleSourceField() {
@@ -327,7 +328,7 @@ let _subModalTarget = null;
 let _subModalPrevValue = null;
 
 function openSubModal() {
-  document.getElementById('sub-modal-body').innerHTML = nodeFormHTML();
+  document.getElementById('sub-modal-body').innerHTML = sanitizeHtml(nodeFormHTML());
   document.getElementById('sub-modal-error').textContent = '';
   document.getElementById('sub-modal-overlay').classList.add('open');
 }

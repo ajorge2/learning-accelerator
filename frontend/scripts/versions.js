@@ -5,30 +5,30 @@ const GEN_PARAMS_KEY = 'graphGenParams';
 export const MAX_VERSIONS = 3;
 
 export function getVersions() {
-  try { return JSON.parse(localStorage.getItem(VERSIONS_KEY)) || []; }
+  try { return JSON.parse(sessionStorage.getItem(VERSIONS_KEY)) || []; }
   catch { return []; }
 }
 
 export function getCurrentIdx() {
-  return parseInt(localStorage.getItem('graphVersionIdx') ?? '0', 10);
+  return parseInt(sessionStorage.getItem('graphVersionIdx') ?? '0', 10);
 }
 
 export function setCurrentIdx(idx) {
-  localStorage.setItem('graphVersionIdx', String(idx));
+  sessionStorage.setItem('graphVersionIdx', String(idx));
 }
 
 export function saveGenParams(subject, notes, goal = '', importance = 5) {
-  localStorage.setItem(GEN_PARAMS_KEY, JSON.stringify({ subject, notes, goal, importance }));
+  sessionStorage.setItem(GEN_PARAMS_KEY, JSON.stringify({ subject, notes, goal, importance }));
 }
 
 export function getGenParams() {
-  try { return JSON.parse(localStorage.getItem(GEN_PARAMS_KEY)) || {}; }
+  try { return JSON.parse(sessionStorage.getItem(GEN_PARAMS_KEY)) || {}; }
   catch { return {}; }
 }
 
 export function clearVersions() {
-  localStorage.removeItem(VERSIONS_KEY);
-  localStorage.removeItem('graphVersionIdx');
+  sessionStorage.removeItem(VERSIONS_KEY);
+  sessionStorage.removeItem('graphVersionIdx');
 }
 
 /** Snapshot the current graph state and push it as the newest version. */
@@ -41,7 +41,7 @@ export function pushSnapshot() {
   };
   versions.unshift(snap);
   if (versions.length > MAX_VERSIONS) versions.length = MAX_VERSIONS;
-  localStorage.setItem(VERSIONS_KEY, JSON.stringify(versions));
+  sessionStorage.setItem(VERSIONS_KEY, JSON.stringify(versions));
   setCurrentIdx(0);
 }
 

@@ -100,16 +100,16 @@ window.devExport = async () => {
   return data;
 };
 
-// Save current DB state to localStorage under a named snapshot
+// Save current DB state to sessionStorage under a named snapshot
 window.devSaveSnapshot = async (name = 'default') => {
   const data = await window.devExport();
-  localStorage.setItem(`devSnapshot_${name}`, JSON.stringify(data));
+  sessionStorage.setItem(`devSnapshot_${name}`, JSON.stringify(data));
   console.log(`[dev] Snapshot saved: "${name}" (state: ${data.state})`);
 };
 
 // Restore a named snapshot: clears graph, re-creates nodes/edges/questions, sets state
 window.devLoadSnapshot = async (name = 'default') => {
-  const raw = localStorage.getItem(`devSnapshot_${name}`);
+  const raw = sessionStorage.getItem(`devSnapshot_${name}`);
   if (!raw) { console.error(`[dev] No snapshot named "${name}"`); return; }
   const data = JSON.parse(raw);
 

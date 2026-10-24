@@ -102,6 +102,7 @@ def gen_outline_from_notes(subject: str, notes: str, goal: str = "", importance:
     with nodes and connections.
     """
     response = client.responses.parse(
+        store=False,
         prompt={
             "id": OUTLINE_PROMPT_ID,
             "version": OUTLINE_PROMPT_VERSION,
@@ -132,6 +133,7 @@ def infer_expertise_levels(
     Uses structured output for reliability.
     """
     response = client.responses.parse(
+        store=False,
         prompt={
             "id": EXPERTISE_PROMPT_ID,
             "version": EXPERTISE_PROMPT_VERSION,
@@ -180,6 +182,7 @@ def update_outline(
     ) or "(no notes)"
 
     response = client.responses.parse(
+        store=False,
         prompt={
             "id": UPDATE_OUTLINE_PROMPT_ID,
             "version": UPDATE_OUTLINE_PROMPT_VERSION,
@@ -232,6 +235,7 @@ def explore_question(
     edges_str = "\n".join(edges_lines) or "(none)"
 
     response = client.responses.create(
+        store=False,
         prompt={
             "id": EXPLORE_PROMPT_ID,
             "version": EXPLORE_PROMPT_VERSION,
@@ -290,6 +294,7 @@ def gen_reflection_questions(
     ) or "(empty)"
 
     response = client.responses.parse(
+        store=False,
         prompt={
             "id": REFLECTION_PROMPT_ID,
             "version": REFLECTION_PROMPT_VERSION,
@@ -338,6 +343,7 @@ def gen_edit_suggestions(
     ) or "(no answers provided)"
 
     response = client.responses.parse(
+        store=False,
         prompt={
             "id": EDIT_SUGGESTIONS_PROMPT_ID,
             "version": EDIT_SUGGESTIONS_PROMPT_VERSION,
@@ -366,6 +372,7 @@ def extract_knowledge_from_pdf(pdf_bytes: bytes, subject: str) -> str:
     b64 = base64.b64encode(pdf_bytes).decode()
 
     response = client.responses.create(
+        store=False,
         prompt={
             "id": PDF_KNOWLEDGE_PROMPT_ID,
             "version": PDF_KNOWLEDGE_PROMPT_VERSION,

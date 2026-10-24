@@ -1,3 +1,4 @@
+from contextvars import ContextVar
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -5,11 +6,12 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "graph.db"
 DEFAULT_USER_ID = 'default'
+REQUEST_DB_PATH = ContextVar('learning_request_db', default=None)
 
 
 @contextmanager
 def _db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(REQUEST_DB_PATH.get() or DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")

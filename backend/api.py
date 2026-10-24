@@ -1,7 +1,8 @@
 from dotenv import load_dotenv
 load_dotenv(dotenv_path='../.env.local')
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -18,12 +19,55 @@ graph = GraphService()
 user_state = UserState()
 expertise_service = ExpertiseService()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Each browser holds an unguessable bearer secret in sessionStorage. Its SQLite
+# file is private to that session and removed after one hour of inactivity.
+import hashlib, re, shutil, tempfile, time
+from pathlib import Path
+_SESSION_ROOT = Path(tempfile.mkdtemp(prefix="learning-private-sessions-"))
+_SESSIONS = {}
+_ALLOWED_ORIGINS = ["https://learning-accelerator.vercel.app", "http://localhost:3000", "http://127.0.0.1:3000"]
+app.add_middleware(CORSMiddleware, allow_origins=_ALLOWED_ORIGINS,
+                   allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+                   allow_headers=["Content-Type", "X-Learning-Session"])
+
+@app.middleware("http")
+async def isolate_browser(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    origin = request.headers.get("origin")
+    if origin and origin not in _ALLOWED_ORIGINS:
+        return JSONResponse({"detail": "Origin not allowed"}, status_code=403)
+    secret = request.headers.get("x-learning-session", "")
+    if not re.fullmatch(r"[a-f0-9]{64}", secret):
+        return JSONResponse({"detail": "Open the application to start a private browser session"}, status_code=401)
+    now = time.monotonic()
+    for key, record in list(_SESSIONS.items()):
+        if now - record[1] > 3600:
+            shutil.rmtree(record[0].parent, ignore_errors=True)
+            del _SESSIONS[key]
+    digest = hashlib.sha256(secret.encode()).hexdigest()
+    if digest not in _SESSIONS:
+        if len(_SESSIONS) >= 128:
+            return JSONResponse({"detail": "Demo busy; retry later"}, status_code=429)
+        directory = Path(tempfile.mkdtemp(dir=_SESSION_ROOT))
+        _SESSIONS[digest] = (directory / "graph.db", now)
+        marker = db.REQUEST_DB_PATH.set(_SESSIONS[digest][0])
+        try:
+            db.init_db()
+        finally:
+            db.REQUEST_DB_PATH.reset(marker)
+    path = _SESSIONS[digest][0]
+    _SESSIONS[digest] = (path, now)
+    marker = db.REQUEST_DB_PATH.set(path)
+    try:
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+    finally:
+        db.REQUEST_DB_PATH.reset(marker)
+
 
 
 # TODO(pre-release): make it so each detail panel has an option to view sources.
@@ -573,19 +617,5 @@ class AlgoliaSyncRequest(BaseModel):
 
 @app.post("/algolia/sync")
 def algolia_sync(req: AlgoliaSyncRequest):
-    app_id   = os.environ.get("ALGOLIA_APP_ID")
-    write_key = os.environ.get("ALGOLIA_WRITE_KEY")
-    index    = os.environ.get("ALGOLIA_INDEX_NAME", "learning_accelerator")
-    if not app_id or not write_key:
-        raise HTTPException(status_code=503, detail="Algolia not configured")
-    url = f"https://{app_id}-dsn.algolia.net/1/indexes/{index}/batch"
-    payload = {"requests": [{"action": "updateObject", "body": r} for r in req.records]}
-    headers = {
-        "X-Algolia-Application-Id": app_id,
-        "X-Algolia-API-Key": write_key,
-        "Content-Type": "application/json",
-    }
-    resp = requests.post(url, json=payload, headers=headers)
-    if resp.status_code >= 400:
-        raise HTTPException(status_code=502, detail="Algolia sync failed")
-    return {"ok": True}
+    # A shared, browser-searchable index would defeat private graph isolation.
+    raise HTTPException(status_code=403, detail="Shared search indexing is disabled for private sessions")

@@ -1,3 +1,4 @@
+import {sanitizeHtml} from './safeHtml.js';
 import { nodes, edges } from './api.js';
 
 function _populate() {
@@ -24,7 +25,7 @@ function _populate() {
     `;
   }).join('');
 
-  body.innerHTML = `
+  body.innerHTML = sanitizeHtml(`
     <div id="it-header-ideas" class="it-section-title it-section-title-ideas">Ideas</div>
     <div class="it-table-wrap">
       <table class="it-table">
@@ -39,7 +40,7 @@ function _populate() {
         <tbody>${edgeRows || '<tr><td class="it-cell it-empty" colspan="2">No connections yet</td></tr>'}</tbody>
       </table>
     </div>
-  `;
+  `);
 
   const ideasHeader = body.querySelector('#it-header-ideas');
   const connHeader  = body.querySelector('#it-header-connections');

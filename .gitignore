@@ -5,3 +5,9 @@ dist/
 __pycache__/
 *.pyc
 graph.db
+
+.env
+*.pem
+*.key
+
+.pytest_cache/

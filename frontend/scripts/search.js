@@ -1,3 +1,4 @@
+import {sanitizeHtml} from './safeHtml.js';
 import { edges, getAlgoliaSearchIdx } from './api.js';
 import { switchView } from './ui.js';
 import { zoomToNode, showDetailPanel } from './graph.js';
@@ -13,13 +14,13 @@ async function handleSearch(query) {
   try {
     const { hits } = await idx.search(query, { hitsPerPage: 8 });
     if (!hits.length) {
-      container.innerHTML = '<div class="search-no-results">No results found</div>';
+      container.innerHTML = sanitizeHtml('<div class="search-no-results">No results found</div>');
     } else {
-      container.innerHTML = hits.map(hit => {
+      container.innerHTML = sanitizeHtml(hits.map(hit => {
         if (hit.type === 'node') {
           const title = hit._highlightResult?.title?.value || hit.title || 'Untitled';
           const sub   = hit.body ? hit.body.slice(0, 65) : '';
-          return `<div class="search-result-item" onclick="navigateToResult('node','${hit.nodeId}')">
+          return `<div class="search-result-item" data-ui-action="navigateToResult" data-ui-kind="node" data-ui-id="${hit.nodeId}">
             <span class="search-result-type node">Idea</span>
             <div class="search-result-text">
               <div class="search-result-title">${title}</div>
@@ -29,7 +30,7 @@ async function handleSearch(query) {
         } else {
           const label = hit.body || '<span style="font-style:italic;color:#2d3f52">No description</span>';
           const ctx   = `${hit.nodeATitle || '?'} → ${hit.nodeBTitle || '?'}`;
-          return `<div class="search-result-item" onclick="navigateToResult('edge','${hit.edgeId}')">
+          return `<div class="search-result-item" data-ui-action="navigateToResult" data-ui-kind="edge" data-ui-id="${hit.edgeId}">
             <span class="search-result-type edge">Conn</span>
             <div class="search-result-text">
               <div class="search-result-title">${ctx}</div>
@@ -37,7 +38,7 @@ async function handleSearch(query) {
             </div>
           </div>`;
         }
-      }).join('');
+      }).join(''));
     }
     container.classList.add('visible');
   } catch (err) {

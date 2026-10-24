@@ -1,3 +1,4 @@
+import {sanitizeHtml} from './safeHtml.js';
 import { getVersions, getCurrentIdx, restoreVersion, canRegenerate, MAX_VERSIONS } from './versions.js';
 
 const HISTORY_KEY = 'editHistory';
@@ -7,12 +8,12 @@ export function addHistory(label, icon = '•') {
   const list = getHistory();
   list.unshift({ ts: Date.now(), label, icon });
   if (list.length > MAX) list.length = MAX;
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+  sessionStorage.setItem(HISTORY_KEY, JSON.stringify(list));
   _render();
 }
 
 export function getHistory() {
-  try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || []; }
+  try { return JSON.parse(sessionStorage.getItem(HISTORY_KEY)) || []; }
   catch { return []; }
 }
 
@@ -29,16 +30,16 @@ function _render() {
   if (!el) return;
   const list = getHistory();
   if (!list.length) {
-    el.innerHTML = '<li class="history-empty">No edits yet</li>';
+    el.innerHTML = sanitizeHtml('<li class="history-empty">No edits yet</li>');
     return;
   }
-  el.innerHTML = list.map(e => `
+  el.innerHTML = sanitizeHtml(list.map(e => `
     <li class="history-item">
       <span class="history-icon">${e.icon}</span>
       <span class="history-label">${e.label}</span>
       <span class="history-time">${_age(e.ts)}</span>
     </li>
-  `).join('');
+  `).join(''));
 }
 
 export function renderVersionHistory() {
@@ -54,7 +55,7 @@ export function renderVersionHistory() {
     `Graph Versions (${versions.length}/${MAX_VERSIONS})`;
 
   const list = section.querySelector('.graph-versions-list');
-  list.innerHTML = versions.map((v, i) => {
+  list.innerHTML = sanitizeHtml(versions.map((v, i) => {
     const isActive  = i === currentIdx;
     const label     = i === 0 ? 'latest' : (i === versions.length - 1 ? 'original' : `v${versions.length - i}`);
     const date      = new Date(v.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -62,7 +63,7 @@ export function renderVersionHistory() {
       <span class="version-pill-label">Version ${versions.length - i} <span class="version-pill-tag">${label}</span></span>
       <span class="version-pill-time">${date}</span>
     </button>`;
-  }).join('');
+  }).join(''));
 
   list.querySelectorAll('.version-pill').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -96,7 +97,7 @@ export function toggleHistoryDrawer() {
 }
 
 export function clearHistory() {
-  localStorage.removeItem(HISTORY_KEY);
+  sessionStorage.removeItem(HISTORY_KEY);
   _render();
 }
 

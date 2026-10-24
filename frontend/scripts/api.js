@@ -1,8 +1,26 @@
-import algoliasearch from 'algoliasearch';
 import { renderNodes, renderEdges, showConfirm } from './ui.js';
 import { renderGraph } from './graph.js';
 
 export const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Scope all application requests, including calls in other modules, to this tab.
+const SESSION_KEY = 'learning-private-session';
+let privateSession = sessionStorage.getItem(SESSION_KEY);
+if (!/^[a-f0-9]{64}$/.test(privateSession || '')) {
+  privateSession = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
+  sessionStorage.setItem(SESSION_KEY, privateSession);
+}
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, init = {}) => {
+  const url = new URL(typeof input === 'string' ? input : input.url, window.location.href);
+  const base = new URL(API, window.location.href);
+  if (url.origin === base.origin && (url.pathname === base.pathname || url.pathname.startsWith(base.pathname.replace(/\/$/, '') + '/'))) {
+    const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+    headers.set('X-Learning-Session', privateSession);
+    return nativeFetch(input, {...init, headers});
+  }
+  return nativeFetch(input, init);
+};
+
 export let nodes = {};
 export let edges = {};
 export let currentState = null;
@@ -44,47 +62,9 @@ const ALGOLIA_INDEX_NAME = 'learning_accelerator';
 
 let _algoliaSearchIdx = null;
 
-export function initAlgolia() {
-  const appId     = import.meta.env.VITE_ALGOLIA_APP_ID;
-  const searchKey = import.meta.env.VITE_ALGOLIA_SEARCH_KEY;
-  if (!appId || !searchKey || searchKey.startsWith('YOUR_')) return;
-  _algoliaSearchIdx = algoliasearch(appId, searchKey).initIndex(ALGOLIA_INDEX_NAME);
-}
-
-export function getAlgoliaSearchIdx() {
-  return _algoliaSearchIdx;
-}
-
-export async function syncAlgolia() {
-  const records = [
-    ...Object.values(nodes).map(n => ({
-      objectID:  `node_${n.id}`,
-      type:      'node',
-      title:     n.title || '',
-      body:      n.body  || '',
-      nodeId:    n.id,
-    })),
-    ...Object.values(edges).map(e => ({
-      objectID:   `edge_${e.id}`,
-      type:       'edge',
-      body:       e.body || '',
-      nodeATitle: nodes[e.node_a_id]?.title || '',
-      nodeBTitle: nodes[e.node_b_id]?.title || '',
-      edgeId:     e.id,
-      nodeAId:    e.node_a_id,
-      nodeBId:    e.node_b_id,
-    })),
-  ];
-  try {
-    await fetch(`${API}/algolia/sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ records }),
-    });
-  } catch (err) {
-    console.error('Algolia sync failed:', err);
-  }
-}
+export function initAlgolia() { /* Private graphs never enter a shared index. */ }
+export function getAlgoliaSearchIdx() { return null; }
+export async function syncAlgolia() { /* Intentionally local-only. */ }
 
 // ---- Data ----
 

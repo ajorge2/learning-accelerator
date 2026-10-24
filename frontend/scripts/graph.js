@@ -1,3 +1,4 @@
+import {sanitizeHtml} from './safeHtml.js';
 import * as d3 from 'd3';
 import { nodes, edges, loadData, apiRequest, API, currentState, undoStack } from './api.js';
 import { showConfirm, openEditNode, deleteNode, openEdgeModal, deleteEdge } from './ui.js';
@@ -121,15 +122,15 @@ let _bendAnimId  = null;
 let _palettePointerdown = null;
 const SIM_STORAGE_KEY = 'nodeSimData';
 let nodeSimData = (() => {
-  try { return JSON.parse(localStorage.getItem(SIM_STORAGE_KEY)) || {}; } catch { return {}; }
+  try { return JSON.parse(sessionStorage.getItem(SIM_STORAGE_KEY)) || {}; } catch { return {}; }
 })();
-export let cheeseMode = localStorage.getItem('cheeseMode') === '1';
+export let cheeseMode = sessionStorage.getItem('cheeseMode') === '1';
 let _edgePanelOpen = false;
 let _saveSimTimer = null;
 function saveSimData() {
   clearTimeout(_saveSimTimer);
   _saveSimTimer = setTimeout(() => {
-    try { localStorage.setItem(SIM_STORAGE_KEY, JSON.stringify(nodeSimData)); } catch {}
+    try { sessionStorage.setItem(SIM_STORAGE_KEY, JSON.stringify(nodeSimData)); } catch {}
   }, 500);
 }
 let currentK = 1;
@@ -841,7 +842,7 @@ function currentNodePath() {
 
 export function toggleCheeseMode() {
   cheeseMode = !cheeseMode;
-  localStorage.setItem('cheeseMode', cheeseMode ? '1' : '0');
+  sessionStorage.setItem('cheeseMode', cheeseMode ? '1' : '0');
   document.getElementById('btn-cheese').classList.toggle('active', cheeseMode);
   gZoom.select('.nodes-layer').selectAll('.g-node path').each(function(d) {
     this.setAttribute('d', currentNodePath(d.id));
@@ -1850,7 +1851,7 @@ export function showToast(msg) {
 export function showPillError(errorId, inputId) {
   clearTimeout(_pillErrorTimer);
   const el = document.getElementById(errorId);
-  el.innerHTML = 'Press <u>Enter</u> to continue working';
+  el.innerHTML = sanitizeHtml('Press <u>Enter</u> to continue working');
   el.classList.add('visible');
   document.getElementById(inputId)?.focus();
   _pillErrorTimer = setTimeout(() => el.classList.remove('visible'), 3000);
@@ -2214,16 +2215,16 @@ function refreshSelectionClasses() {
   if (!isolatedNodes && selectionListOrder.length >= 3) {
     const activeCount = multiSelected.size;
     const headerEl = document.getElementById('selection-list-header');
-    headerEl.innerHTML = `<span>${activeCount} of ${selectionListOrder.length} selected</span>`
-      + (activeCount >= 2 ? `<button class="btn-isolate-list" onclick="isolateSelected()">⊠ Isolate</button>` : '');
+    headerEl.innerHTML = sanitizeHtml(`<span>${activeCount} of ${selectionListOrder.length} selected</span>`
+      + (activeCount >= 2 ? `<button class="btn-isolate-list" data-ui-action="isolateSelected">⊠ Isolate</button>` : ''));
     const itemsEl = document.getElementById('selection-list-items');
-    itemsEl.innerHTML = selectionListOrder.map(id => {
+    itemsEl.innerHTML = sanitizeHtml(selectionListOrder.map(id => {
       const active = multiSelected.has(id);
       return `<div class="selection-list-item${active ? '' : ' deselected'}" data-id="${id}">
         <span class="selection-list-item-name">${nodes[id]?.title ?? id}</span>
         <button class="selection-list-item-btn">${active ? '×' : '+'}</button>
       </div>`;
-    }).join('');
+    }).join(''));
     itemsEl.querySelectorAll('.selection-list-item').forEach(row => {
       row.querySelector('.selection-list-item-btn').onclick = e => {
         e.stopPropagation();
@@ -2343,7 +2344,7 @@ function showBranchPanel(v, event) {
     </div>`;
   }).join('');
 
-  content.innerHTML = `
+  content.innerHTML = sanitizeHtml(`
     <div class="branch-panel-header">
       <span class="branch-icon">⑂</span>
       <span class="branch-title">${v.edgeIds.length} connections — <strong>${hubTitle}</strong></span>
@@ -2354,7 +2355,7 @@ function showBranchPanel(v, event) {
       <button class="branch-action-btn branch-delete-btn">Delete all</button>
       ${currentState !== 'FirstOutline' ? `<button class="branch-action-btn branch-attach-btn">+ Add connection</button>` : ''}
     </div>
-  `;
+  `);
 
   // Inline edit description — patches all edges in group (read-only in FirstOutline)
   const bodyEl = content.querySelector('.branch-body');
@@ -2423,7 +2424,7 @@ function showBranchPanel(v, event) {
   const swatchClr    = i => EDGE_PALETTE[i]?.color ?? EDGE_PALETTE[0].color;
   const dropContainer = document.getElementById('palette-dropdown-container');
   dropContainer.style.display = '';
-  dropContainer.innerHTML = `
+  dropContainer.innerHTML = sanitizeHtml(`
     <details class="palette-details">
       <summary style="background:${swatchClr(colorIdx)};" title="Change color"></summary>
       <div class="palette-popup">
@@ -2432,7 +2433,7 @@ function showBranchPanel(v, event) {
         </div>
       </div>
     </details>
-  `;
+  `);
   const detailsEl = dropContainer.querySelector('.palette-details');
   const summaryEl = dropContainer.querySelector('summary');
   detailsEl.addEventListener('toggle', () => {
@@ -2486,7 +2487,7 @@ export function showDetailPanel(type, id, event) {
         ${ro ? '' : '<button class="detail-conn-delete" title="Delete connection">×</button>'}
       </div>`;
     }).join('');
-    content.innerHTML = `
+    content.innerHTML = sanitizeHtml(`
       ${n.node_type === 'Subject' ? '<span class="detail-subject-badge">Subject</span>' : ''}
       <h4 class="editable-title" title="Click to edit title">${n.title}</h4>
       <div class="detail-tab-bar">
@@ -2502,7 +2503,7 @@ export function showDetailPanel(type, id, event) {
           : `<p class="detail-no-connections">No connections yet!</p>`}
         <button class="detail-create-link-btn" data-node-id="${id}">+ Create connection</button>
       </div>
-    `;
+    `);
 
     content.querySelectorAll('.detail-tab-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -2528,7 +2529,7 @@ export function showDetailPanel(type, id, event) {
     const titleEl = content.querySelector('.editable-title');
 
     const bodyEl = content.querySelector('.editable-body');
-    if (n.body) bodyEl.innerHTML = n.body;
+    if (n.body) bodyEl.innerHTML = sanitizeHtml(n.body);
     else bodyEl.textContent = '';
 
     content.querySelectorAll('.detail-conn-row').forEach(row => {
@@ -2615,7 +2616,7 @@ export function showDetailPanel(type, id, event) {
     const swatchColor = i => `hsla(${NODE_PALETTE[i].h},${NODE_PALETTE[i].s + 10}%,${NODE_PALETTE[i].l + 14}%,0.92)`;
     const dropContainer = document.getElementById('palette-dropdown-container');
     dropContainer.style.display = '';
-    dropContainer.innerHTML = `
+    dropContainer.innerHTML = sanitizeHtml(`
       <details class="palette-details">
         <summary style="background:${swatchColor(colorIdx)};" title="Change color"></summary>
         <div class="palette-popup">
@@ -2624,7 +2625,7 @@ export function showDetailPanel(type, id, event) {
           </div>
         </div>
       </details>
-    `;
+    `);
     const detailsEl  = dropContainer.querySelector('.palette-details');
     const summaryEl  = dropContainer.querySelector('summary');
     const paletteEl  = dropContainer.querySelector('.detail-palette');
@@ -2651,14 +2652,14 @@ export function showDetailPanel(type, id, event) {
     const bTitle = nodes[e.node_b_id]?.title ?? e.node_b_id;
     const dirSymbol = () => e.bidirectional ? '↔' : (e.source_id === e.node_a_id ? '→' : '←');
     const edgeRo = currentState === 'FirstOutline';
-    content.innerHTML = `
+    content.innerHTML = sanitizeHtml(`
       <p class="editable-body${e.body ? '' : ' detail-body-empty'}"${edgeRo ? '' : ' title="Click to edit label"'}>${e.body || (edgeRo ? '' : 'Add a label…')}</p>
       <div class="edge-direction-row">
         <span class="edge-node-label"${edgeRo ? '' : ` data-field="node_a_id" data-staying-id="${e.node_b_id}" title="Click to reconnect"`}>${aTitle}</span>
         <span class="detail-conn-dir edge-dir-btn"${edgeRo ? '' : ' title="Click to change direction"'}>${dirSymbol()}</span>
         <span class="edge-node-label"${edgeRo ? '' : ` data-field="node_b_id" data-staying-id="${e.node_a_id}" title="Click to reconnect"`}>${bTitle}</span>
       </div>
-    `;
+    `);
 
     const bodyEl = content.querySelector('.editable-body');
     if (!edgeRo) bodyEl.addEventListener('click', () => {
@@ -2737,7 +2738,7 @@ export function showDetailPanel(type, id, event) {
     const edgeSwatchClr = i => EDGE_PALETTE[i]?.color ?? EDGE_PALETTE[0].color;
     const dropContainer = document.getElementById('palette-dropdown-container');
     dropContainer.style.display = '';
-    dropContainer.innerHTML = `
+    dropContainer.innerHTML = sanitizeHtml(`
       <details class="palette-details">
         <summary style="background:${edgeSwatchClr(edgeColorIdx)};" title="Change color"></summary>
         <div class="palette-popup">
@@ -2746,7 +2747,7 @@ export function showDetailPanel(type, id, event) {
           </div>
         </div>
       </details>
-    `;
+    `);
     const detailsEl = dropContainer.querySelector('.palette-details');
     const summaryEl = dropContainer.querySelector('summary');
     const paletteEl = dropContainer.querySelector('.detail-palette');
@@ -2784,15 +2785,15 @@ export function showDetailPanel(type, id, event) {
 
   const renderQuestions = (questions) => {
     if (!questions.length) {
-      qList.innerHTML = '<p class="detail-no-questions">No questions yet.</p>';
+      qList.innerHTML = sanitizeHtml('<p class="detail-no-questions">No questions yet.</p>');
       return;
     }
-    qList.innerHTML = questions.map(q => `
+    qList.innerHTML = sanitizeHtml(questions.map(q => `
       <div class="detail-question-row" data-id="${q.id}">
         <span class="detail-question-text">${q.text}</span>
         <button class="detail-question-delete" data-id="${q.id}" title="Delete question">×</button>
       </div>
-    `).join('');
+    `).join(''));
     qList.querySelectorAll('.detail-question-delete').forEach(btn => {
       btn.addEventListener('click', async () => {
         await fetch(`${API}/questions/${btn.dataset.id}`, { method: 'DELETE' });
