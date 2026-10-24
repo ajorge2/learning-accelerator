@@ -129,15 +129,15 @@ python seed.py   # requires backend to be running; populates a sample learning-s
 
 ## Privacy defaults
 
-Browser requests use a cryptographically random session secret held in sessionStorage. Each session has a separate temporary SQLite database; another session cannot read or mutate it. Temporary files expire on the next request after one hour of inactivity. Closing a tab loses the session secret; it does not immediately erase server files. Shared Algolia indexing is disabled. Existing pre-audit `backend/graph.db` files are not exposed by the session middleware and are not deleted automatically. Operators must review and remove their own legacy data/backups.
+Browser requests use a cryptographically random session secret held in sessionStorage. Each session has a separate temporary SQLite database; another session cannot read or mutate it. Temporary files expire on the next request after one hour of inactivity. Closing a tab loses the session secret; it does not immediately erase server files. Shared Algolia indexing is disabled.
 
 AI features transmit submitted notes, questions, and PDF bytes to OpenAI. Responses explicitly set `store=False`; provider abuse-monitoring and other retention policies still apply. Never put a write/admin key in a Vite-prefixed variable. The implementation is a single-process demo; deploy one worker or replace the session store before scaling.
 
 ## Research citation
 
-Hidi, S., & Renninger, K. A. (2006). *The Four-Phase Model of Interest Development*. Educational Psychologist, 41(2), 111–127. https://doi.org/10.1207/s15326985ep4102_4. The third-party paper is no longer redistributed in this repository.
+Hidi, S., & Renninger, K. A. (2006). *The Four-Phase Model of Interest Development*. Educational Psychologist, 41(2), 111–127. https://doi.org/10.1207/s15326985ep4102_4.
 
-Browser HTML from users/models is sanitized before insertion, and citation navigation accepts HTTP(S) only. Older browser localStorage and pre-audit shared Algolia records are not automatically erased; operators/users must review their legacy copies.
+Browser HTML from users/models is sanitized before insertion, and citation navigation accepts HTTP(S) only.
 
 ## Privacy and licensing
 
